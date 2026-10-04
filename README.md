@@ -11,7 +11,7 @@ It uses the system `/usr/bin/ssh` client under a real PTY. NotRoyalTs does not
 implement SSH cryptography itself and does not copy private keys into its
 database.
 
-> **Project status:** public release `v1.0.1`.
+> **Current source version:** `v1.0.1`.
 >
 > **Primary target:** Apple Silicon Macs (`arm64`). The run and build scripts
 > intentionally reject Rosetta on Apple Silicon so NotRoyalTs is not
