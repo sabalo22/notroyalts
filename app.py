@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QTextEdit
 import pyte,db
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.0.0"
+APP_VERSION="1.0.1"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
