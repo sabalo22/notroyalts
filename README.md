@@ -11,7 +11,11 @@ It uses the system `/usr/bin/ssh` client under a real PTY. NotRoyalTs does not
 implement SSH cryptography itself and does not copy private keys into its
 database.
 
-> **Project status:** first public release, `v1.0.0`.
+> **Project status:** public release `v1.0.1`.
+>
+> **Primary target:** Apple Silicon Macs (`arm64`). The run and build scripts
+> intentionally reject Rosetta on Apple Silicon so NotRoyalTs is not
+> accidentally built as an Intel-only application.
 
 ## Features
 
@@ -38,39 +42,92 @@ database.
 ## Requirements
 
 - macOS
-- Python 3.10+ recommended; Python 3.12 is what the project is primarily tested with
+- Apple Silicon (`arm64`) recommended and the primary target
+- Python 3.10+; Python 3.12 is recommended
 - `/usr/bin/ssh`
 - PySide6
 - pyte
+
+On Apple Silicon, native Homebrew normally lives under:
+
+```text
+/opt/homebrew
+```
+
+If you use Homebrew, Python 3.12 can be installed with:
+
+```bash
+brew install python@3.12
+```
 
 NotRoyalTs is currently macOS-specific because it uses macOS paths, keyboard
 behavior, application packaging, and the system SSH client directly.
 
 ## Run from source
 
-Clone the repository, then:
+Clone the repository:
+
+```bash
+git clone https://github.com/sabalo22/notroyalts.git
+cd notroyalts
+```
+
+Then run:
 
 ```bash
 ./run.sh
 ```
 
-`run.sh` creates a local `.venv`, installs the runtime requirements, and starts
-NotRoyalTs.
+`run.sh`:
 
-You can also do it manually:
+- detects the current CPU architecture
+- rejects a Rosetta-translated shell on Apple Silicon
+- prefers native Homebrew Python under `/opt/homebrew` on Apple Silicon
+- requires Python 3.10 or newer
+- replaces an incompatible project `.venv`
+- installs the runtime requirements and starts NotRoyalTs
+
+If an Apple Silicon Mac reports `x86_64` from `uname -m`, the shell is running
+under Rosetta. Start a native shell first:
 
 ```bash
-python3 -m venv .venv
+arch -arm64 /bin/zsh --login
+```
+
+Then verify:
+
+```bash
+uname -m
+```
+
+It should report:
+
+```text
+arm64
+```
+
+### Manual Apple Silicon setup
+
+```bash
+/opt/homebrew/bin/python3.12 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 python app.py
 ```
 
 ## Build the macOS app
 
+On Apple Silicon, run the build from a native `arm64` shell:
+
 ```bash
 ./build-macos.sh
 ```
+
+The build script refuses to create an Intel/Rosetta build on Apple Silicon. It
+selects a native Python for the current architecture, creates a clean build
+environment, runs PyInstaller, and prints the architecture of the resulting app
+executable.
 
 The resulting application is written to:
 
@@ -131,6 +188,9 @@ Use:
 Backups preserve folder hierarchy and connection definitions but do not include
 private key files.
 
+Because backup files are readable JSON, treat them as sensitive if your saved
+hostnames, usernames, notes, or network information are sensitive.
+
 ## Royal TS import
 
 NotRoyalTs can import SSH connection definitions from Royal TS XML / `.rtsz`
@@ -138,6 +198,9 @@ documents when the document content is XML.
 
 Imported fields include connection name, host, port, username, key path,
 description, and folder placement where available. Password fields are ignored.
+
+Existing matching folders are reused and existing matching connections are
+skipped, making repeat imports safer.
 
 NotRoyalTs is an independent project and is not affiliated with, endorsed by, or
 sponsored by Royal Apps or Royal TS. Royal TS is a trademark of its respective
