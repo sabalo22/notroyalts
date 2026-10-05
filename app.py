@@ -11,7 +11,7 @@ import pyte,db
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.2"
+APP_VERSION="1.1.3"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -24,11 +24,18 @@ class CompatibleScreen(pyte.Screen):
     vendor-specific private SGR sequences cannot break the terminal loop.
     """
     def select_graphic_rendition(self,*attrs,private=False):
+        # Private CSI ... m sequences are not normal SGR. pyte 0.8.2 passes
+        # them here with private=True; treating their numeric parameters as
+        # ordinary SGR can accidentally enable underline/reverse/etc.
+        if private:
+            return
         return super().select_graphic_rendition(*attrs)
 
 
 class CompatibleHistoryScreen(pyte.HistoryScreen):
     def select_graphic_rendition(self,*attrs,private=False):
+        if private:
+            return
         return super().select_graphic_rendition(*attrs)
 
 
@@ -72,6 +79,26 @@ def qt_terminal_color(value, default):
         return QColor(value)
 
     return QColor(default)
+
+def terminal_cell_format_key(ch):
+    """Return the renderer's formatting key for a pyte cell.
+
+    Decorations such as underline/strikethrough are meaningful on glyphs, but
+    drawing them on terminal padding spaces creates long horizontal rules in a
+    QTextDocument. Keep color/reverse attributes on blanks (needed for status
+    bars and backgrounds) while suppressing those line decorations.
+    """
+    data=getattr(ch,"data"," ")
+    blank=(not data) or data.isspace()
+    return (
+        getattr(ch,"fg","default"),
+        getattr(ch,"bg","default"),
+        bool(getattr(ch,"bold",False)),
+        bool(getattr(ch,"italics",False)),
+        False if blank else bool(getattr(ch,"underscore",False)),
+        False if blank else bool(getattr(ch,"strikethrough",False)),
+        bool(getattr(ch,"reverse",False)),
+    )
 
 def sshargs(r):
     a=["/usr/bin/ssh"]
@@ -476,16 +503,7 @@ class Term(QPlainTextEdit):
             run_key=None
 
             def cell_key(x):
-                ch=rowbuf[x]
-                return (
-                    getattr(ch,"fg","default"),
-                    getattr(ch,"bg","default"),
-                    bool(getattr(ch,"bold",False)),
-                    bool(getattr(ch,"italics",False)),
-                    bool(getattr(ch,"underscore",False)),
-                    bool(getattr(ch,"strikethrough",False)),
-                    bool(getattr(ch,"reverse",False)),
-                )
+                return terminal_cell_format_key(rowbuf[x])
 
             def apply_run(x0,x1,key):
                 if x1<=x0:
