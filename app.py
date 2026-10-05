@@ -11,7 +11,7 @@ import pyte,db
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.0"
+APP_VERSION="1.1.1"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -83,6 +83,11 @@ class Term(QPlainTextEdit):
         self.output_pending=b""
         self.last_pty_size=None
 
+        # PTY master is non-blocking. A single os.write() is not guaranteed to
+        # accept the entire payload (especially clipboard pastes), so preserve
+        # unwritten bytes here and drain them asynchronously in order.
+        self.tx_buffer=bytearray()
+
         # Some remote bash/readline setups emit the first prompt, then shortly
         # afterward send CR + ESC[K + the exact same prompt to redraw it in
         # place. Native terminals overwrite the current line; pyte was showing
@@ -140,6 +145,10 @@ class Term(QPlainTextEdit):
         self.pump_timer.setInterval(5)
         self.pump_timer.timeout.connect(self.pump_output)
 
+        self.tx_timer=QTimer(self)
+        self.tx_timer.setInterval(5)
+        self.tx_timer.timeout.connect(self.pump_input)
+
         QTimer.singleShot(0,self.start)
 
     def start(self):
@@ -189,6 +198,7 @@ class Term(QPlainTextEdit):
 
         self.process_timer.start()
         self.pump_timer.start()
+        self.tx_timer.start()
         self.setFocus()
 
     def filter_startup_duplicate_redraw(self,data):
@@ -562,11 +572,43 @@ class Term(QPlainTextEdit):
         return False
 
     def send(self,b):
-        if self.fd is not None:
-            try:
-                os.write(self.fd,b)
-            except OSError:
-                pass
+        if self.fd is None or not b:
+            return
+
+        # Preserve strict byte ordering. If an earlier write was partial, new
+        # keystrokes must follow the queued remainder rather than overtaking it.
+        if self.tx_buffer:
+            self.tx_buffer.extend(b)
+            return
+
+        try:
+            written=os.write(self.fd,b)
+        except BlockingIOError:
+            written=0
+        except OSError:
+            return
+
+        if written < len(b):
+            self.tx_buffer.extend(b[written:])
+
+    def pump_input(self):
+        if self.fd is None or not self.tx_buffer:
+            return
+
+        # Keep each GUI callback small while allowing large pastes to drain
+        # quickly. os.write() may still accept fewer bytes than requested.
+        chunk=bytes(self.tx_buffer[:65536])
+
+        try:
+            written=os.write(self.fd,chunk)
+        except BlockingIOError:
+            return
+        except OSError:
+            self.tx_buffer.clear()
+            return
+
+        if written > 0:
+            del self.tx_buffer[:written]
 
     def copy_selection(self):
         cursor = self.textCursor()
@@ -788,6 +830,8 @@ class Term(QPlainTextEdit):
         self.cursor_timer.stop()
         self.render_timer.stop()
         self.pump_timer.stop()
+        self.tx_timer.stop()
+        self.tx_buffer.clear()
         self.reader_stop.set()
 
         if self.fd is not None:
