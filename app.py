@@ -24,11 +24,18 @@ class CompatibleScreen(pyte.Screen):
     vendor-specific private SGR sequences cannot break the terminal loop.
     """
     def select_graphic_rendition(self,*attrs,private=False):
+        # Private CSI ... m sequences are not normal SGR. pyte 0.8.2 passes
+        # them here with private=True; treating their numeric parameters as
+        # ordinary SGR can accidentally enable underline/reverse/etc.
+        if private:
+            return
         return super().select_graphic_rendition(*attrs)
 
 
 class CompatibleHistoryScreen(pyte.HistoryScreen):
     def select_graphic_rendition(self,*attrs,private=False):
+        if private:
+            return
         return super().select_graphic_rendition(*attrs)
 
 
