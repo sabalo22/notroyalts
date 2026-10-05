@@ -11,9 +11,26 @@ import pyte,db
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.1"
+APP_VERSION="1.1.2"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
+
+class CompatibleScreen(pyte.Screen):
+    """pyte 0.8.2 compatibility for private CSI SGR sequences.
+
+    pyte's parser can dispatch SGR with private=True, but 0.8.2's
+    Screen.select_graphic_rendition() does not accept that keyword.
+    Newer upstream code does. Accept and ignore it here so malformed or
+    vendor-specific private SGR sequences cannot break the terminal loop.
+    """
+    def select_graphic_rendition(self,*attrs,private=False):
+        return super().select_graphic_rendition(*attrs)
+
+
+class CompatibleHistoryScreen(pyte.HistoryScreen):
+    def select_graphic_rendition(self,*attrs,private=False):
+        return super().select_graphic_rendition(*attrs)
+
 
 # ANSI/xterm palette used by the terminal renderer. pyte exposes the color
 # attributes for each screen cell; earlier NotRoyalTs builds rendered only
@@ -72,7 +89,7 @@ class Term(QPlainTextEdit):
         self.connection_id=connection_id
         self.fd=None
         self.pid=None
-        self.scr=pyte.HistoryScreen(120,35,history=10000,ratio=0.10)
+        self.scr=CompatibleHistoryScreen(120,35,history=10000,ratio=0.10)
         self.stream=pyte.Stream(self.scr)
         self.history_view=False
         self.app_cursor=False
@@ -401,7 +418,7 @@ class Term(QPlainTextEdit):
 
         cols = getattr(self.scr, "columns", 120)
         rows = getattr(self.scr, "lines", 35)
-        self.scr = pyte.Screen(cols, rows)
+        self.scr = CompatibleScreen(cols, rows)
         self.stream = pyte.Stream(self.scr)
         self.alt_screen = True
 
