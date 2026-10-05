@@ -2,6 +2,24 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.0 - Unreleased
+
+Optional application lock.
+
+### Added
+
+- Optional password prompt before the main NotRoyalTs UI is created
+- macOS Keychain-backed password verifier using PBKDF2-SHA256
+- **Security → App Lock Settings…** for enabling, disabling, or changing the App Lock password
+- **Security → Lock NotRoyalTs** for manually locking an open application
+- brief retry delay after repeated failed unlock attempts
+- automated tests for App Lock verifier creation and validation
+
+### Security
+
+- App Lock protects access to the NotRoyalTs interface but does not encrypt the SQLite database, exported JSON backups, or SSH private keys
+- changing or disabling App Lock requires the current App Lock password
+
 ## 1.0.1 - 2026-10-04
 
 Apple Silicon build and launcher fix.
