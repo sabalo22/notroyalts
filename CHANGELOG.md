@@ -2,6 +2,13 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.2 - Unreleased
+
+### Fixed
+
+- Prevented pyte 0.8.2 from crashing on private CSI SGR sequences that pass an unsupported `private` keyword to the screen renderer
+- Added compatibility coverage for both normal history screens and alternate screens
+
 ## 1.1.1 - 2026-10-05
 
 ### Fixed
