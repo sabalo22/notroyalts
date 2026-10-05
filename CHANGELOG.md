@@ -2,6 +2,13 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.4 - Unreleased
+
+### Fixed
+
+- Terminal text selection can now span the full available scrollback instead of being limited to the visible screen
+- Live terminal repainting no longer destroys an active multi-screen copy selection
+
 ## 1.1.3 - 2026-10-05
 
 ### Fixed
