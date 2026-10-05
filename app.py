@@ -8,9 +8,10 @@ from PySide6.QtGui import QFont,QKeyEvent,QTextCursor,QTextCharFormat,QBrush,QCo
 from PySide6.QtWidgets import *
 from PySide6.QtWidgets import QTextEdit
 import pyte,db
+import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.0.1"
+APP_VERSION="1.1.0"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -886,7 +887,186 @@ class ConnDialog(QDialog):
 
     def data(self):return {"name":self.name.text(),"folder_id":self.folder.currentData(),"host":self.host.text(),"port":self.port.value(),"username":self.user.text(),"identity_file":self.key.text(),"proxy_jump":self.jump.text(),"extra_args":self.extra.text(),"notes":self.notes.toPlainText()}
 
+
+def app_lock_enabled():
+    return QSettings("NotRoyalTs","NotRoyalTs").value(
+        "app_lock_enabled",
+        False,
+        type=bool,
+    )
+
+
+class UnlockDialog(QDialog):
+    def __init__(self,parent=None,title="Unlock NotRoyalTs",message=None):
+        super().__init__(parent)
+        self.failures=0
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(380)
+
+        layout=QVBoxLayout(self)
+
+        label=QLabel(
+            message
+            or "Enter the NotRoyalTs App Lock password to continue."
+        )
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+        self.password=QLineEdit()
+        self.password.setEchoMode(QLineEdit.Password)
+        self.password.setPlaceholderText("Password")
+        self.password.returnPressed.connect(self.tryUnlock)
+        layout.addWidget(self.password)
+
+        self.error=QLabel("")
+        self.error.setWordWrap(True)
+        layout.addWidget(self.error)
+
+        self.buttons=QDialogButtonBox(
+            QDialogButtonBox.Ok|QDialogButtonBox.Cancel
+        )
+        self.ok_button=self.buttons.button(QDialogButtonBox.Ok)
+        self.buttons.accepted.connect(self.tryUnlock)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+        QTimer.singleShot(0,self.password.setFocus)
+
+    def tryUnlock(self):
+        password=self.password.text()
+
+        try:
+            unlocked=app_lock.verify_password(password)
+        except app_lock.KeychainError as exc:
+            QMessageBox.critical(
+                self,
+                "NotRoyalTs App Lock",
+                str(exc),
+            )
+            return
+
+        if unlocked:
+            self.password.clear()
+            super().accept()
+            return
+
+        self.failures+=1
+        self.password.clear()
+        self.error.setText("Incorrect password.")
+        self.password.setFocus()
+
+        if self.failures%3==0:
+            self.password.setEnabled(False)
+            self.ok_button.setEnabled(False)
+            self.error.setText("Incorrect password. Try again in 2 seconds.")
+            QTimer.singleShot(2000,self.enableRetry)
+
+    def enableRetry(self):
+        self.password.setEnabled(True)
+        self.ok_button.setEnabled(True)
+        self.error.setText("")
+        self.password.setFocus()
+
+
+class AppLockSettingsDialog(QDialog):
+    def __init__(self,parent=None,enabled=False):
+        super().__init__(parent)
+        self.original_enabled=bool(enabled)
+        self.setWindowTitle("App Lock Settings")
+        self.setMinimumWidth(480)
+
+        layout=QVBoxLayout(self)
+
+        self.enable_lock=QCheckBox("Require password when NotRoyalTs starts")
+        self.enable_lock.setChecked(self.original_enabled)
+        layout.addWidget(self.enable_lock)
+
+        note=QLabel(
+            "App Lock prevents casual access to the NotRoyalTs interface. "
+            "It does not encrypt the SQLite database, exported backup files, "
+            "or SSH private keys."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        form=QFormLayout()
+        self.password=QLineEdit()
+        self.password.setEchoMode(QLineEdit.Password)
+        self.confirm=QLineEdit()
+        self.confirm.setEchoMode(QLineEdit.Password)
+        form.addRow(
+            "New password:",
+            self.password,
+        )
+        form.addRow(
+            "Confirm password:",
+            self.confirm,
+        )
+        layout.addLayout(form)
+
+        hint=QLabel(
+            "Leave both password fields blank to keep the current password."
+            if self.original_enabled
+            else "Set a password to enable App Lock."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.enable_lock.toggled.connect(self.updatePasswordFields)
+        self.updatePasswordFields(self.enable_lock.isChecked())
+
+        buttons=QDialogButtonBox(
+            QDialogButtonBox.Save|QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.validateAndAccept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def updatePasswordFields(self,checked):
+        self.password.setEnabled(checked)
+        self.confirm.setEnabled(checked)
+
+    def validateAndAccept(self):
+        enabled=self.enable_lock.isChecked()
+        password=self.password.text()
+        confirm=self.confirm.text()
+
+        if enabled and not self.original_enabled and not password:
+            QMessageBox.warning(
+                self,
+                "App Lock",
+                "Enter a password before enabling App Lock.",
+            )
+            return
+
+        if password or confirm:
+            if password!=confirm:
+                QMessageBox.warning(
+                    self,
+                    "App Lock",
+                    "The new passwords do not match.",
+                )
+                return
+            if not password:
+                QMessageBox.warning(
+                    self,
+                    "App Lock",
+                    "The password cannot be empty.",
+                )
+                return
+
+        super().accept()
+
+    def lockEnabled(self):
+        return self.enable_lock.isChecked()
+
+    def newPassword(self):
+        return self.password.text()
+
+
 class Win(QMainWindow):
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
@@ -980,6 +1160,19 @@ class Win(QMainWindow):
         a.triggered.connect(self.importBackup)
         fm.addAction(a)
 
+        security_menu=self.menuBar().addMenu("Security")
+
+        a=QAction("App Lock Settings…",self)
+        a.triggered.connect(self.configureAppLock)
+        security_menu.addAction(a)
+
+        security_menu.addSeparator()
+
+        self.lock_action=QAction("Lock NotRoyalTs",self)
+        self.lock_action.setEnabled(app_lock_enabled())
+        self.lock_action.triggered.connect(self.lockApp)
+        security_menu.addAction(self.lock_action)
+
         sm=self.menuBar().addMenu("Session")
 
         a=QAction("Reconnect Current Tab",self)
@@ -1009,6 +1202,98 @@ class Win(QMainWindow):
         a.setShortcut(QKeySequence("Ctrl+K"))
         a.triggered.connect(self.focusSearch)
         self.addAction(a)
+
+    def configureAppLock(self):
+        was_enabled=app_lock_enabled()
+
+        if was_enabled:
+            if not app_lock.is_configured():
+                QMessageBox.critical(
+                    self,
+                    "NotRoyalTs App Lock",
+                    (
+                        "App Lock is enabled, but its Keychain verifier "
+                        "could not be found. No settings were changed."
+                    ),
+                )
+                return
+
+            unlock=UnlockDialog(
+                self,
+                "Authenticate App Lock Settings",
+                "Enter the current App Lock password to change security settings.",
+            )
+            if unlock.exec()!=QDialog.Accepted:
+                return
+
+        dialog=AppLockSettingsDialog(self,was_enabled)
+        if dialog.exec()!=QDialog.Accepted:
+            return
+
+        enable=dialog.lockEnabled()
+        new_password=dialog.newPassword()
+
+        try:
+            if enable:
+                if new_password:
+                    app_lock.set_password(new_password)
+                elif not was_enabled:
+                    QMessageBox.warning(
+                        self,
+                        "NotRoyalTs App Lock",
+                        "A password is required to enable App Lock.",
+                    )
+                    return
+
+                self.settings.setValue("app_lock_enabled",True)
+            else:
+                app_lock.clear_password()
+                self.settings.setValue("app_lock_enabled",False)
+
+            self.settings.sync()
+        except (app_lock.KeychainError,ValueError) as exc:
+            QMessageBox.critical(
+                self,
+                "NotRoyalTs App Lock",
+                str(exc),
+            )
+            return
+
+        enabled=app_lock_enabled()
+        self.lock_action.setEnabled(enabled)
+
+        QMessageBox.information(
+            self,
+            "NotRoyalTs App Lock",
+            (
+                "App Lock is enabled."
+                if enabled
+                else "App Lock is disabled."
+            ),
+        )
+
+    def lockApp(self):
+        if not app_lock_enabled():
+            return
+
+        self.hide()
+        QApplication.processEvents()
+
+        unlock=UnlockDialog(
+            None,
+            "NotRoyalTs Locked",
+            "NotRoyalTs is locked. Enter the App Lock password to continue.",
+        )
+
+        if unlock.exec()==QDialog.Accepted:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            return
+
+        # Canceling a manual lock closes the application instead of revealing
+        # the previously hidden connection UI.
+        self.close()
 
     def focusSearch(self):
         self.search.setFocus()
@@ -1873,10 +2158,40 @@ class Win(QMainWindow):
         e.accept()
 
 def main():
-    db.init()
     app=QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+
+    if app_lock_enabled():
+        try:
+            configured=app_lock.is_configured()
+        except app_lock.KeychainError as exc:
+            QMessageBox.critical(
+                None,
+                "NotRoyalTs App Lock",
+                str(exc),
+            )
+            return 1
+
+        if not configured:
+            QMessageBox.critical(
+                None,
+                "NotRoyalTs App Lock",
+                (
+                    "App Lock is enabled, but its macOS Keychain verifier "
+                    "could not be found. NotRoyalTs will remain locked."
+                ),
+            )
+            return 1
+
+        unlock=UnlockDialog(None)
+        if unlock.exec()!=QDialog.Accepted:
+            return 0
+
+    # Do not initialize or display the connection database until App Lock has
+    # been satisfied.
+    db.init()
+
     w=Win()
     w.show()
     return app.exec()
