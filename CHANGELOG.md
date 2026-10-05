@@ -9,7 +9,7 @@ All notable public changes to NotRoyalTs will be documented here.
 - Clipboard pastes into vi/vim no longer risk truncation when the non-blocking PTY accepts only part of a write
 - queued terminal input now preserves byte ordering and drains asynchronously, including bracketed-paste terminators
 
-## 1.1.0 - Unreleased
+## 1.1.0 - 2026-10-04
 
 Optional application lock.
 
