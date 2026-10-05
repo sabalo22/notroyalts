@@ -6,7 +6,7 @@ import app
 
 class PtyTransmitBufferTests(unittest.TestCase):
     def make_term(self):
-        term=object.__new__(app.Term)
+        term=app.Term.__new__(app.Term)
         term.fd=42
         term.tx_buffer=bytearray()
         return term
