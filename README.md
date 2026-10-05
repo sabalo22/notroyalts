@@ -11,7 +11,7 @@ It uses the system `/usr/bin/ssh` client under a real PTY. NotRoyalTs does not
 implement SSH cryptography itself and does not copy private keys into its
 database.
 
-> **Current source version:** `v1.0.1`.
+> **Current source version:** `v1.1.0`.
 >
 > **Primary target:** Apple Silicon Macs (`arm64`). The run and build scripts
 > intentionally reject Rosetta on Apple Silicon so NotRoyalTs is not
@@ -38,6 +38,8 @@ database.
 - Backup and restore using readable JSON
 - Royal TS document import for SSH connections
 - Automatic migration from the earlier SSHDesk development builds
+- Optional startup App Lock backed by macOS Keychain
+- Manual **Security → Lock NotRoyalTs** action
 
 ## Requirements
 
@@ -178,6 +180,31 @@ passes the selected key path to `/usr/bin/ssh`.
 
 The Royal TS importer intentionally does **not** import stored password fields.
 
+## App Lock
+
+NotRoyalTs can optionally require an App Lock password before the main window
+and connection tree are created.
+
+Enable it from:
+
+- **Security → App Lock Settings…**
+
+When App Lock is enabled:
+
+- startup asks for the App Lock password before loading the connection UI
+- **Security → Lock NotRoyalTs** hides the application until it is unlocked
+- canceling a manual unlock closes NotRoyalTs instead of revealing the hidden UI
+- the password itself is not stored by NotRoyalTs
+- a salted PBKDF2-SHA256 verifier is stored in macOS Keychain
+
+After three failed password attempts, the unlock dialog pauses briefly before
+allowing another attempt.
+
+App Lock is intentionally an application-access barrier, not disk encryption.
+It does **not** encrypt the SQLite database, JSON backup files, SSH key files,
+or other files on the Mac. A person with sufficient access to the user's files
+can still inspect connection metadata outside the application.
+
 ## Backup and restore
 
 Use:
@@ -242,7 +269,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and
 A quick syntax check is:
 
 ```bash
-python -m py_compile app.py db.py
+python -m py_compile app.py db.py app_lock.py
 ```
 
 ## License
