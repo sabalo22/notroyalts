@@ -2,6 +2,13 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.3 - Unreleased
+
+### Fixed
+
+- Prevented vi/vim underline attributes on terminal padding spaces from rendering as horizontal rules across rows
+- Preserved background/reverse styling on blank cells while limiting underline/strikethrough decoration to visible glyphs
+
 ## 1.1.2 - 2026-10-05
 
 ### Fixed
