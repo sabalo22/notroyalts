@@ -24,5 +24,12 @@ NotRoyalTs:
 - stores connection metadata in an unencrypted local SQLite database
 - exports connection metadata as unencrypted JSON
 - intentionally ignores Royal TS password fields during import
+- can optionally require an App Lock password before displaying the connection UI
+- stores only a salted password verifier for App Lock in macOS Keychain
 
-Users should rely on normal OpenSSH permissions and key-management practices.
+App Lock is an application-access barrier only. It does not encrypt the local
+SQLite connection database, exported JSON backups, SSH private keys, or other
+files on disk.
+
+Users should rely on normal macOS account security, disk encryption, OpenSSH
+permissions, and key-management practices.
