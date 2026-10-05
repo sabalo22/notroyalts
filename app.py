@@ -11,7 +11,7 @@ import pyte,db
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.3"
+APP_VERSION="1.1.4"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -100,6 +100,40 @@ def terminal_cell_format_key(ch):
         bool(getattr(ch,"reverse",False)),
     )
 
+def terminal_row_plain_text(row, columns):
+    """Render one pyte row as plain text without terminal padding."""
+    chars=[]
+    for x in range(columns):
+        try:
+            ch=row[x]
+        except (KeyError, IndexError, TypeError):
+            chars.append(" ")
+            continue
+        chars.append(getattr(ch,"data"," ") or " ")
+    return "".join(chars).rstrip()
+
+
+def terminal_scrollback_snapshot(screen):
+    """Return full available scrollback text and current-screen start row.
+
+    HistoryScreen moves rows between history.top, buffer, and history.bottom
+    while paging. Concatenating those three regions reconstructs the complete
+    logical scrollback in display order without mutating pyte's history state.
+    """
+    history=getattr(screen,"history",None)
+    if history is None or not hasattr(history,"top") or not hasattr(history,"bottom"):
+        lines=[terminal_row_plain_text(screen.buffer[y],screen.columns)
+               for y in range(screen.lines)]
+        return "\n".join(lines),0
+
+    top=list(history.top)
+    current=[screen.buffer[y] for y in range(screen.lines)]
+    bottom=list(history.bottom)
+    rows=top+current+bottom
+    lines=[terminal_row_plain_text(row,screen.columns) for row in rows]
+    return "\n".join(lines),len(top)
+
+
 def sshargs(r):
     a=["/usr/bin/ssh"]
     if int(r["port"] or 22)!=22:a+=["-p",str(r["port"])]
@@ -119,6 +153,8 @@ class Term(QPlainTextEdit):
         self.scr=CompatibleHistoryScreen(120,35,history=10000,ratio=0.10)
         self.stream=pyte.Stream(self.scr)
         self.history_view=False
+        self.copy_mode=False
+        self.copy_snapshot_current_start=0
         self.app_cursor=False
         self.bracketed_paste=False
         self.alt_screen=False
@@ -461,7 +497,13 @@ class Term(QPlainTextEdit):
         self.saved_stream = None
         self.alt_screen = False
 
-    def render(self):
+    def render(self,force=False):
+        # Do not rebuild the Qt document while the user is selecting from the
+        # full scrollback snapshot. PTY output continues to update pyte in the
+        # background and is rendered as soon as copy mode ends.
+        if self.copy_mode and not force:
+            return
+
         # pyte's Screen.display contains the visible characters, while the
         # per-cell buffer contains ANSI attributes such as foreground color,
         # background color, bold, underline, reverse video, etc.
@@ -550,6 +592,38 @@ class Term(QPlainTextEdit):
             if run_key is not None:
                 apply_run(run_start,cols,run_key)
 
+
+    def begin_copy_mode(self):
+        if self.copy_mode or self.alt_screen or not hasattr(self.scr,"history"):
+            return False
+
+        text,current_start=terminal_scrollback_snapshot(self.scr)
+        self.copy_mode=True
+        self.copy_snapshot_current_start=current_start
+        self.setExtraSelections([])
+        self.setPlainText(text)
+
+        # Keep the same logical terminal screen in view after expanding the Qt
+        # document from one screen to the complete scrollback snapshot.
+        bar=self.verticalScrollBar()
+        bar.setValue(min(bar.maximum(),max(bar.minimum(),current_start)))
+        return True
+
+    def end_copy_mode(self):
+        if not self.copy_mode:
+            return
+
+        self.copy_mode=False
+        self.copy_snapshot_current_start=0
+        self.render(force=True)
+
+    def mousePressEvent(self,e):
+        if e.button()==Qt.LeftButton:
+            self.begin_copy_mode()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self,e):
+        super().mouseReleaseEvent(e)
 
     def draw_cursor(self):
         if not self.hasFocus() or not self.cursor_on or self.history_view:
@@ -654,7 +728,12 @@ class Term(QPlainTextEdit):
         selected = cursor.selectedText().replace("\u2029", "\n")
         QApplication.clipboard().setText(selected)
 
+        # Once the text is safely on the clipboard, return to the live terminal
+        # and show any output that arrived while the snapshot was being used.
+        self.end_copy_mode()
+
     def paste_clipboard(self):
+        self.end_copy_mode()
         text = QApplication.clipboard().text()
         if not text:
             return
@@ -714,6 +793,11 @@ class Term(QPlainTextEdit):
         return True
 
     def wheelEvent(self,e):
+        # While selecting from the snapshot, let Qt scroll the expanded
+        # document normally so the selection can extend across many screens.
+        if self.copy_mode:
+            return super().wheelEvent(e)
+
         if self.alt_screen:
             return super().wheelEvent(e)
 
@@ -756,6 +840,9 @@ class Term(QPlainTextEdit):
         if (m & Qt.ShiftModifier) and k == Qt.Key_Insert:
             self.paste_clipboard()
             return
+
+        # Any real terminal input leaves selection snapshot mode first.
+        self.end_copy_mode()
 
         # Full-screen terminal apps (vi/vim, less, etc.) often enable
         # DECCKM "application cursor keys". In that mode xterm sends SS3
@@ -866,6 +953,7 @@ class Term(QPlainTextEdit):
         self.render_timer.stop()
         self.pump_timer.stop()
         self.tx_timer.stop()
+        self.copy_mode=False
         self.tx_buffer.clear()
         self.reader_stop.set()
 
