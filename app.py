@@ -152,6 +152,7 @@ class Term(QPlainTextEdit):
         self.history_view=False
         self.copy_mode=False
         self.copy_snapshot_current_start=0
+        self.copy_snapshot_live_start=0
         self.copy_snapshot_rows=None
         self.app_cursor=False
         self.bracketed_paste=False
@@ -605,22 +606,31 @@ class Term(QPlainTextEdit):
         if self.copy_mode or self.alt_screen or not hasattr(self.scr,"history"):
             return False
 
-        rows,current_start=terminal_scrollback_rows(self.scr)
+        # Capture the user's current history viewport first. Then move pyte
+        # back to the live bottom before entering snapshot mode so the terminal
+        # cursor state remains authoritative while the static snapshot is shown.
+        rows,view_start=terminal_scrollback_rows(self.scr)
+        self.restore_live_history()
+        live_start=max(0,len(rows)-getattr(self.scr,"lines",0))
+
         text="\n".join(
             terminal_row_plain_text(row,self.scr.columns)
             for row in rows
         )
         self.copy_mode=True
-        self.copy_snapshot_current_start=current_start
+        self.copy_snapshot_current_start=view_start
+        self.copy_snapshot_live_start=live_start
         self.copy_snapshot_rows=rows
         self.setExtraSelections([])
         self.setPlainText(text)
         self.apply_rows_formatting(rows)
 
-        # Keep the same logical terminal screen in view after expanding the Qt
+        # Keep the same logical history region in view after expanding the Qt
         # document from one screen to the complete scrollback snapshot.
         bar=self.verticalScrollBar()
-        bar.setValue(min(bar.maximum(),max(bar.minimum(),current_start)))
+        bar.setValue(min(bar.maximum(),max(bar.minimum(),view_start)))
+        self.cursor_on=True
+        QTimer.singleShot(0,self.draw_cursor)
         return True
 
     def restore_live_history(self):
@@ -650,6 +660,7 @@ class Term(QPlainTextEdit):
 
         self.copy_mode=False
         self.copy_snapshot_current_start=0
+        self.copy_snapshot_live_start=0
         self.copy_snapshot_rows=None
         if return_live:
             self.restore_live_history()
@@ -664,26 +675,20 @@ class Term(QPlainTextEdit):
         super().mouseReleaseEvent(e)
 
     def draw_cursor(self):
-        # pyte intentionally hides the terminal cursor while the HistoryScreen
-        # is paged back from the live bottom. Respect that state; otherwise a
-        # stale cursor position from the paged screen appears somewhere inside
-        # the copy snapshot (often far above the selected text).
-        if (
-            not self.hasFocus()
-            or not self.cursor_on
-            or bool(getattr(self.scr.cursor,"hidden",False))
-        ):
+        if not self.hasFocus() or not self.cursor_on:
             self.setExtraSelections([])
             return
 
-        # In copy mode the Qt document is the full scrollback snapshot. When
-        # that snapshot was created from the live page, translate the terminal
-        # cursor row into snapshot coordinates so the cursor can keep blinking
-        # while a selection remains highlighted.
         if self.copy_mode:
-            row=self.copy_snapshot_current_start+self.scr.cursor.y
+            # begin_copy_mode() restores pyte to the live bottom before the
+            # snapshot is displayed, so cursor.y is the real live cursor. Map
+            # it onto the live-screen portion of the full snapshot.
+            if bool(getattr(self.scr.cursor,"hidden",False)):
+                self.setExtraSelections([])
+                return
+            row=self.copy_snapshot_live_start+self.scr.cursor.y
         else:
-            if self.history_view:
+            if self.history_view or bool(getattr(self.scr.cursor,"hidden",False)):
                 self.setExtraSelections([])
                 return
             row=self.scr.cursor.y
