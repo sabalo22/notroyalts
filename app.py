@@ -147,13 +147,14 @@ class Term(QPlainTextEdit):
         self.connection_id=connection_id
         self.fd=None
         self.pid=None
-        self.scr=CompatibleHistoryScreen(120,35,history=10000,ratio=0.10)
+        self.scr=CompatibleHistoryScreen(120,35,history=2000,ratio=0.10)
         self.stream=pyte.Stream(self.scr)
         self.history_view=False
         self.copy_mode=False
         self.copy_snapshot_current_start=0
         self.copy_snapshot_live_start=0
         self.copy_snapshot_rows=None
+        self.copy_resume_pending=False
         self.app_cursor=False
         self.bracketed_paste=False
         self.alt_screen=False
@@ -205,6 +206,16 @@ class Term(QPlainTextEdit):
         self.render_timer.setSingleShot(True)
         self.render_timer.setInterval(75)
         self.render_timer.timeout.connect(self.render)
+
+        # When returning from a scrollback-copy snapshot, prefer to repaint
+        # only after the first echoed/output byte from the remote side arrives.
+        # This avoids painting the old prompt first and then repainting again
+        # for the newly typed character. The short fallback handles no-echo
+        # prompts and applications.
+        self.copy_resume_timer=QTimer(self)
+        self.copy_resume_timer.setSingleShot(True)
+        self.copy_resume_timer.setInterval(150)
+        self.copy_resume_timer.timeout.connect(self.finish_copy_resume)
 
         # Drain ssh's PTY independently of Qt rendering.
         self.rx_lock=threading.Lock()
@@ -390,7 +401,13 @@ class Term(QPlainTextEdit):
             return
 
         self.process_output(b"".join(pieces))
-        if not self.render_timer.isActive():
+
+        if self.copy_resume_pending:
+            self.copy_resume_timer.stop()
+            self.copy_resume_pending=False
+            self.render_timer.stop()
+            self.render(force=True)
+        elif not self.render_timer.isActive():
             self.render_timer.start()
 
     def begin_interrupt_drop(self):
@@ -676,31 +693,36 @@ class Term(QPlainTextEdit):
 
         self.history_view=False
 
-    def end_copy_mode(self,return_live=False):
+    def finish_copy_resume(self):
+        if not self.copy_resume_pending:
+            return
+        self.copy_resume_pending=False
+        self.render(force=True)
+
+    def end_copy_mode(self,return_live=False,defer_render=False):
         if not self.copy_mode:
             if return_live:
                 self.restore_live_history()
             return
 
-        # When leaving the full-scrollback snapshot, rebuild the live terminal
-        # while viewport updates are frozen. Otherwise Qt can briefly paint an
-        # intermediate history position before ensureCursorVisible() returns to
-        # the prompt, which looks like a quick scroll-up/scroll-down flash.
-        if return_live:
-            self.setUpdatesEnabled(False)
+        self.copy_mode=False
+        self.copy_snapshot_current_start=0
+        self.copy_snapshot_live_start=0
+        self.copy_snapshot_rows=None
 
-        try:
-            self.copy_mode=False
-            self.copy_snapshot_current_start=0
-            self.copy_snapshot_live_start=0
-            self.copy_snapshot_rows=None
-            if return_live:
-                self.restore_live_history()
-            self.render(force=True)
-        finally:
-            if return_live:
-                self.setUpdatesEnabled(True)
-                self.viewport().update()
+        if return_live:
+            self.restore_live_history()
+
+        if return_live and defer_render:
+            # Keep the snapshot painted until the first remote echo/output.
+            # pyte is already restored to the newest page underneath it.
+            self.copy_resume_pending=True
+            self.copy_resume_timer.start()
+            return
+
+        self.copy_resume_timer.stop()
+        self.copy_resume_pending=False
+        self.render(force=True)
 
     def mousePressEvent(self,e):
         # Ordinary selection on the current screen stays on the live terminal.
@@ -841,7 +863,7 @@ class Term(QPlainTextEdit):
         # transition until the user actually resumes interacting with the shell.
 
     def paste_clipboard(self):
-        self.end_copy_mode(return_live=True)
+        self.end_copy_mode(return_live=True,defer_render=True)
         text = QApplication.clipboard().text()
         if not text:
             return
@@ -975,7 +997,7 @@ class Term(QPlainTextEdit):
         # to the newest terminal page before the keystroke is sent. Otherwise,
         # starting a copy while paged back in history can leave the display
         # parked at the old selection after typing resumes.
-        self.end_copy_mode(return_live=True)
+        self.end_copy_mode(return_live=True,defer_render=True)
 
         # Full-screen terminal apps (vi/vim, less, etc.) often enable
         # DECCKM "application cursor keys". In that mode xterm sends SS3
@@ -1084,6 +1106,7 @@ class Term(QPlainTextEdit):
         self.process_timer.stop()
         self.cursor_timer.stop()
         self.render_timer.stop()
+        self.copy_resume_timer.stop()
         self.pump_timer.stop()
         self.tx_timer.stop()
         self.copy_mode=False
