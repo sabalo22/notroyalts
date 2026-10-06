@@ -682,13 +682,25 @@ class Term(QPlainTextEdit):
                 self.restore_live_history()
             return
 
-        self.copy_mode=False
-        self.copy_snapshot_current_start=0
-        self.copy_snapshot_live_start=0
-        self.copy_snapshot_rows=None
+        # When leaving the full-scrollback snapshot, rebuild the live terminal
+        # while viewport updates are frozen. Otherwise Qt can briefly paint an
+        # intermediate history position before ensureCursorVisible() returns to
+        # the prompt, which looks like a quick scroll-up/scroll-down flash.
         if return_live:
-            self.restore_live_history()
-        self.render(force=True)
+            self.setUpdatesEnabled(False)
+
+        try:
+            self.copy_mode=False
+            self.copy_snapshot_current_start=0
+            self.copy_snapshot_live_start=0
+            self.copy_snapshot_rows=None
+            if return_live:
+                self.restore_live_history()
+            self.render(force=True)
+        finally:
+            if return_live:
+                self.setUpdatesEnabled(True)
+                self.viewport().update()
 
     def mousePressEvent(self,e):
         # Ordinary selection on the current screen stays on the live terminal.
