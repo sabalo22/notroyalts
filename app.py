@@ -740,8 +740,7 @@ class Term(QPlainTextEdit):
         rect.setWidth(width)
 
         painter=QPainter(self.viewport())
-        painter.setPen(QPen(QColor("#e8e8e8"),1))
-        painter.drawRect(rect.adjusted(0,0,-1,-1))
+        painter.fillRect(rect.adjusted(0,0,-1,-1),QColor("#e8e8e8"))
         painter.end()
 
     def blink_cursor(self):
