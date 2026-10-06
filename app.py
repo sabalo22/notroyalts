@@ -664,7 +664,15 @@ class Term(QPlainTextEdit):
         super().mouseReleaseEvent(e)
 
     def draw_cursor(self):
-        if not self.hasFocus() or not self.cursor_on:
+        # pyte intentionally hides the terminal cursor while the HistoryScreen
+        # is paged back from the live bottom. Respect that state; otherwise a
+        # stale cursor position from the paged screen appears somewhere inside
+        # the copy snapshot (often far above the selected text).
+        if (
+            not self.hasFocus()
+            or not self.cursor_on
+            or bool(getattr(self.scr.cursor,"hidden",False))
+        ):
             self.setExtraSelections([])
             return
 
