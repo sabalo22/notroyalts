@@ -11,7 +11,7 @@ It uses the system `/usr/bin/ssh` client under a real PTY. NotRoyalTs does not
 implement SSH cryptography itself and does not copy private keys into its
 database.
 
-> **Current source version:** `v1.1.3`.
+> **Current source version:** `v1.1.4`.
 >
 > **Primary target:** Apple Silicon Macs (`arm64`). The run and build scripts
 > intentionally reject Rosetta on Apple Silicon so NotRoyalTs is not
@@ -31,7 +31,7 @@ database.
 - ANSI/xterm colors
 - Tab completion and terminal control keys
 - `vi` / `vim`, `less`, `top`, and alternate-screen handling
-- 10,000-line terminal scrollback
+- 2,000-line terminal scrollback
 - Mouse / trackpad and Shift+PageUp / Shift+PageDown scrollback
 - macOS Command-C / Command-V
 - Reconnect and duplicate-session actions
