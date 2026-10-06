@@ -11,7 +11,7 @@ import pyte,db
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.3"
+APP_VERSION="1.1.4"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -116,7 +116,7 @@ class Term(QPlainTextEdit):
         self.connection_id=connection_id
         self.fd=None
         self.pid=None
-        self.scr=CompatibleHistoryScreen(120,35,history=10000,ratio=0.10)
+        self.scr=CompatibleHistoryScreen(120,35,history=2000,ratio=0.10)
         self.stream=pyte.Stream(self.scr)
         self.history_view=False
         self.app_cursor=False
