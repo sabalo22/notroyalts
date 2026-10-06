@@ -4,7 +4,7 @@ from datetime import datetime,timezone
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from PySide6.QtCore import Qt,QSocketNotifier,QTimer,QEvent,Signal,QSettings
-from PySide6.QtGui import QFont,QKeyEvent,QTextCursor,QTextCharFormat,QBrush,QColor,QAction,QKeySequence
+from PySide6.QtGui import QFont,QKeyEvent,QTextCursor,QTextCharFormat,QBrush,QColor,QAction,QKeySequence,QPainter,QPen
 from PySide6.QtWidgets import *
 from PySide6.QtWidgets import QTextEdit
 import pyte,db
@@ -699,38 +699,50 @@ class Term(QPlainTextEdit):
     def mouseReleaseEvent(self,e):
         super().mouseReleaseEvent(e)
 
-    def draw_cursor(self):
-        # While browsing a full scrollback snapshot there is no meaningful
-        # terminal cursor at that historical viewport. Do not draw a synthetic
-        # cursor there; the live cursor returns when copy mode ends.
+    def cursor_document_position(self):
+        """Return a QTextCursor at the live terminal cursor position."""
         if (
-            not self.hasFocus()
-            or not self.cursor_on
-            or self.copy_mode
+            self.copy_mode
             or self.history_view
             or bool(getattr(self.scr.cursor,"hidden",False))
         ):
-            self.setExtraSelections([])
-            return
+            return None
 
         row=max(0,min(self.scr.cursor.y,self.document().blockCount()-1))
         block=self.document().findBlockByNumber(row)
         if not block.isValid():
-            self.setExtraSelections([])
-            return
+            return None
 
         col=max(0,min(self.scr.cursor.x,max(0,block.length()-1)))
         c=QTextCursor(self.document())
         c.setPosition(block.position()+col)
-        c.movePosition(QTextCursor.Right,QTextCursor.KeepAnchor,1)
+        return c
 
-        sel=QTextEdit.ExtraSelection()
-        sel.cursor=c
-        fmt=QTextCharFormat()
-        fmt.setBackground(QBrush(QColor("#e8e8e8")))
-        fmt.setForeground(QBrush(QColor("#111111")))
-        sel.format=fmt
-        self.setExtraSelections([sel])
+    def draw_cursor(self):
+        # Cursor painting is handled by paintEvent instead of ExtraSelections.
+        # This keeps the terminal cursor completely separate from Qt's native
+        # text-selection model, so dragging a selection across the cursor cell
+        # cannot destroy or replace the user's selection.
+        self.viewport().update()
+
+    def paintEvent(self,e):
+        super().paintEvent(e)
+
+        if not self.hasFocus() or not self.cursor_on:
+            return
+
+        c=self.cursor_document_position()
+        if c is None:
+            return
+
+        rect=self.cursorRect(c)
+        width=max(2,self.fontMetrics().horizontalAdvance("M"))
+        rect.setWidth(width)
+
+        painter=QPainter(self.viewport())
+        painter.setPen(QPen(QColor("#e8e8e8"),1))
+        painter.drawRect(rect.adjusted(0,0,-1,-1))
+        painter.end()
 
     def blink_cursor(self):
         # Kept for compatibility with older code paths; the cursor is solid.
@@ -744,7 +756,7 @@ class Term(QPlainTextEdit):
 
     def focusOutEvent(self,e):
         super().focusOutEvent(e)
-        self.setExtraSelections([])
+        self.viewport().update()
 
     def event(self,e):
         # Qt normally treats Tab as "move focus to the next widget".
