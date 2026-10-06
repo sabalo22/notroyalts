@@ -761,33 +761,14 @@ class Term(QPlainTextEdit):
 
         # Qt uses paragraph separators internally for multi-line selections.
         selected = cursor.selectedText().replace("\u2029", "\n")
-
-        # Preserve both the selection and viewport explicitly around the
-        # clipboard operation. On macOS, Cmd-C can cause QPlainTextEdit to
-        # repaint/focus-cycle in a way that drops our software cursor overlay
-        # even though copy mode itself remains active.
-        selection_start=cursor.selectionStart()
-        selection_end=cursor.selectionEnd()
-        scrollbar=self.verticalScrollBar()
-        scroll_value=scrollbar.value()
-
         QApplication.clipboard().setText(selected)
 
-        restored=QTextCursor(self.document())
-        restored.setPosition(selection_start)
-        restored.setPosition(selection_end,QTextCursor.KeepAnchor)
-        self.setTextCursor(restored)
-        scrollbar.setValue(scroll_value)
-
-        # Keep the terminal's software cursor visible while the copied
-        # selection remains highlighted.
-        self.cursor_on=True
-        QTimer.singleShot(0,self.draw_cursor)
-
-        # Stay in copy mode after copying. Native terminals keep the selection
-        # and viewport stable after Cmd-C/right-click Copy; dropping back to the
-        # live screen here would rebuild the document, clear the selection, and
-        # jump the viewport. The next real terminal input exits copy mode.
+        # The full-scrollback document exists only to make multi-screen
+        # selection possible. Once the copy succeeds, discard that temporary
+        # snapshot and return to the newest live terminal page. Keeping the
+        # snapshot around after Copy loses terminal formatting and leaves the
+        # software cursor detached from the live screen.
+        self.end_copy_mode(return_live=True)
 
     def paste_clipboard(self):
         self.end_copy_mode(return_live=True)
