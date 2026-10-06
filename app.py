@@ -189,12 +189,10 @@ class Term(QPlainTextEdit):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setStyleSheet("background:#111;color:#eee;border:0")
 
-        # Blinking terminal cursor.
+        # Solid terminal cursor. Avoid periodically repainting the cursor with
+        # ExtraSelections while the user is making a text selection.
         self.cursor_on=True
         self.cursor_timer=QTimer(self)
-        self.cursor_timer.setInterval(500)
-        self.cursor_timer.timeout.connect(self.blink_cursor)
-        self.cursor_timer.start()
 
         self.process_timer=QTimer(self)
         self.process_timer.setInterval(250)
@@ -735,7 +733,8 @@ class Term(QPlainTextEdit):
         self.setExtraSelections([sel])
 
     def blink_cursor(self):
-        self.cursor_on=not self.cursor_on
+        # Kept for compatibility with older code paths; the cursor is solid.
+        self.cursor_on=True
         self.draw_cursor()
 
     def focusInEvent(self,e):
