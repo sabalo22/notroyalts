@@ -849,6 +849,17 @@ class Term(QPlainTextEdit):
             self.paste_clipboard()
             return
 
+        # Pressing a modifier by itself (notably Command on macOS) is
+        # not terminal input and must not destroy an active copy selection.
+        if self.copy_mode and k in (
+            Qt.Key_Control,
+            Qt.Key_Shift,
+            Qt.Key_Meta,
+            Qt.Key_Alt,
+            Qt.Key_AltGr,
+        ):
+            return
+
         # Any real terminal input leaves selection snapshot mode first.
         self.end_copy_mode()
 
