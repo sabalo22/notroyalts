@@ -822,10 +822,11 @@ class Term(QPlainTextEdit):
         selected = cursor.selectedText().replace("\u2029","\n")
         QApplication.clipboard().setText(selected)
 
-        # A full-scrollback snapshot is only needed to complete the copy. Once
-        # the clipboard has the data, return directly to the live terminal.
-        if self.copy_mode:
-            self.end_copy_mode(return_live=True)
+        # Keep the full-scrollback snapshot in place after copying. Rebuilding
+        # the live terminal document here causes a visible jump/redraw at the
+        # exact moment Cmd-C is pressed. The next real terminal input (or paste)
+        # already exits copy mode and returns to the live screen, so defer the
+        # transition until the user actually resumes interacting with the shell.
 
     def paste_clipboard(self):
         self.end_copy_mode(return_live=True)
