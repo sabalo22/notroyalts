@@ -728,9 +728,10 @@ class Term(QPlainTextEdit):
         selected = cursor.selectedText().replace("\u2029", "\n")
         QApplication.clipboard().setText(selected)
 
-        # Once the text is safely on the clipboard, return to the live terminal
-        # and show any output that arrived while the snapshot was being used.
-        self.end_copy_mode()
+        # Stay in copy mode after copying. Native terminals keep the selection
+        # and viewport stable after Cmd-C/right-click Copy; dropping back to the
+        # live screen here would rebuild the document, clear the selection, and
+        # jump the viewport. The next real terminal input exits copy mode.
 
     def paste_clipboard(self):
         self.end_copy_mode()
