@@ -113,26 +113,23 @@ def terminal_row_plain_text(row, columns):
     return "".join(chars).rstrip()
 
 
-def terminal_scrollback_snapshot(screen):
-    """Return full available scrollback text and current-screen start row.
-
-    HistoryScreen moves rows between history.top, buffer, and history.bottom
-    while paging. Concatenating those three regions reconstructs the complete
-    logical scrollback in display order without mutating pyte's history state.
-    """
+def terminal_scrollback_rows(screen):
+    """Return all available scrollback rows in display order."""
     history=getattr(screen,"history",None)
     if history is None or not hasattr(history,"top") or not hasattr(history,"bottom"):
-        lines=[terminal_row_plain_text(screen.buffer[y],screen.columns)
-               for y in range(screen.lines)]
-        return "\n".join(lines),0
+        return [screen.buffer[y] for y in range(screen.lines)],0
 
     top=list(history.top)
     current=[screen.buffer[y] for y in range(screen.lines)]
     bottom=list(history.bottom)
-    rows=top+current+bottom
-    lines=[terminal_row_plain_text(row,screen.columns) for row in rows]
-    return "\n".join(lines),len(top)
+    return top+current+bottom,len(top)
 
+
+def terminal_scrollback_snapshot(screen):
+    """Return full available scrollback text and current-screen start row."""
+    rows,current_start=terminal_scrollback_rows(screen)
+    lines=[terminal_row_plain_text(row,screen.columns) for row in rows]
+    return "\n".join(lines),current_start
 
 def sshargs(r):
     a=["/usr/bin/ssh"]
@@ -155,6 +152,7 @@ class Term(QPlainTextEdit):
         self.history_view=False
         self.copy_mode=False
         self.copy_snapshot_current_start=0
+        self.copy_snapshot_rows=None
         self.app_cursor=False
         self.bracketed_paste=False
         self.alt_screen=False
@@ -525,27 +523,39 @@ class Term(QPlainTextEdit):
         self.draw_cursor()
 
     def apply_terminal_formatting(self):
+        rows=[self.scr.buffer[y] for y in range(getattr(self.scr,"lines",0))]
+        self.apply_rows_formatting(rows)
+
+    def apply_rows_formatting(self,rows):
         default_fg="#e8e8e8"
         default_bg="#111111"
-
-        # Walk each pyte screen row and format runs with identical attributes.
-        # At typical terminal sizes this is only a few thousand cells and is
-        # fast enough while preserving full xterm color output from ls, grep,
-        # vim, systemd tools, etc.
-        rows=getattr(self.scr,"lines",0)
         cols=getattr(self.scr,"columns",0)
 
-        for y in range(rows):
+        for y,rowbuf in enumerate(rows):
             block=self.document().findBlockByNumber(y)
             if not block.isValid():
                 continue
 
-            rowbuf=self.scr.buffer[y]
             run_start=0
             run_key=None
 
             def cell_key(x):
-                return terminal_cell_format_key(rowbuf[x])
+                try:
+                    ch=rowbuf[x]
+                except (KeyError,IndexError,TypeError):
+                    ch=None
+                if ch is None:
+                    class Blank:
+                        data=" "
+                        fg="default"
+                        bg="default"
+                        bold=False
+                        italics=False
+                        underscore=False
+                        strikethrough=False
+                        reverse=False
+                    ch=Blank()
+                return terminal_cell_format_key(ch)
 
             def apply_run(x0,x1,key):
                 if x1<=x0:
@@ -566,8 +576,6 @@ class Term(QPlainTextEdit):
                 fmt.setFontUnderline(underline)
                 fmt.setFontStrikeOut(strike)
 
-                # QTextBlock includes a paragraph separator at the end, so cap
-                # formatting at the visible characters in this block.
                 visible=max(0,block.length()-1)
                 x0=min(x0,visible)
                 x1=min(x1,visible)
@@ -597,11 +605,17 @@ class Term(QPlainTextEdit):
         if self.copy_mode or self.alt_screen or not hasattr(self.scr,"history"):
             return False
 
-        text,current_start=terminal_scrollback_snapshot(self.scr)
+        rows,current_start=terminal_scrollback_rows(self.scr)
+        text="\n".join(
+            terminal_row_plain_text(row,self.scr.columns)
+            for row in rows
+        )
         self.copy_mode=True
         self.copy_snapshot_current_start=current_start
+        self.copy_snapshot_rows=rows
         self.setExtraSelections([])
         self.setPlainText(text)
+        self.apply_rows_formatting(rows)
 
         # Keep the same logical terminal screen in view after expanding the Qt
         # document from one screen to the complete scrollback snapshot.
@@ -636,6 +650,7 @@ class Term(QPlainTextEdit):
 
         self.copy_mode=False
         self.copy_snapshot_current_start=0
+        self.copy_snapshot_rows=None
         if return_live:
             self.restore_live_history()
         self.render(force=True)
@@ -763,12 +778,11 @@ class Term(QPlainTextEdit):
         selected = cursor.selectedText().replace("\u2029", "\n")
         QApplication.clipboard().setText(selected)
 
-        # The full-scrollback document exists only to make multi-screen
-        # selection possible. Once the copy succeeds, discard that temporary
-        # snapshot and return to the newest live terminal page. Keeping the
-        # snapshot around after Copy loses terminal formatting and leaves the
-        # software cursor detached from the live screen.
-        self.end_copy_mode(return_live=True)
+        # Keep the styled scrollback snapshot and viewport in place after Copy,
+        # matching normal terminal behavior. Real terminal input exits copy mode
+        # and returns to the newest live page.
+        self.cursor_on=True
+        QTimer.singleShot(0,self.draw_cursor)
 
     def paste_clipboard(self):
         self.end_copy_mode(return_live=True)
