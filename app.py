@@ -817,6 +817,13 @@ class Term(QPlainTextEdit):
         k=e.key()
         m=e.modifiers()
 
+        # Let Qt identify the platform-native Copy shortcut first. On macOS
+        # this is more reliable than inspecting raw modifier flags because
+        # Command/Control mapping can vary across Qt/macOS versions.
+        if e.matches(QKeySequence.Copy):
+            self.copy_selection()
+            return
+
         # IMPORTANT: On macOS, Qt maps the physical Command key to
         # Qt.ControlModifier and the physical Control key to Qt.MetaModifier.
         # So Command-C/V use ControlModifier here, while physical Ctrl-C/V
