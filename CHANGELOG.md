@@ -8,6 +8,13 @@ All notable public changes to NotRoyalTs will be documented here.
 
 - Reduced terminal scrollback history from 10,000 lines to 2,000 lines to keep routine SSH sessions lighter while retaining substantial history
 
+### Fixed
+
+- Terminal text selection can now span the full available scrollback instead of being limited to the visible screen
+- Live terminal repainting no longer destroys an active multi-screen copy selection
+- Terminal cursor is painted independently from Qt text selection so selection can cross the live cursor cell
+- Returning from scrollback copy mode now waits for the first remote echo/output before repainting, avoiding the visible jump back to the prompt
+
 ## 1.1.3 - 2026-10-05
 
 ### Fixed
