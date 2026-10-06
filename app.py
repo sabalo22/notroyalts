@@ -609,12 +609,35 @@ class Term(QPlainTextEdit):
         bar.setValue(min(bar.maximum(),max(bar.minimum(),current_start)))
         return True
 
-    def end_copy_mode(self):
+    def restore_live_history(self):
+        """Return a HistoryScreen to its newest page without repainting."""
+        if self.alt_screen or not hasattr(self.scr,"history"):
+            self.history_view=False
+            return
+
+        h=self.scr.history
+        # next_page() moves rows from history.bottom back into the visible
+        # screen. Keep going until pyte reports that we are at the newest page.
+        guard=0
+        while getattr(h,"position",0) < getattr(h,"size",0) and guard < 10000:
+            before=getattr(h,"position",0)
+            self.scr.next_page()
+            guard+=1
+            if getattr(h,"position",0) == before:
+                break
+
+        self.history_view=False
+
+    def end_copy_mode(self,return_live=False):
         if not self.copy_mode:
+            if return_live:
+                self.restore_live_history()
             return
 
         self.copy_mode=False
         self.copy_snapshot_current_start=0
+        if return_live:
+            self.restore_live_history()
         self.render(force=True)
 
     def mousePressEvent(self,e):
@@ -626,11 +649,23 @@ class Term(QPlainTextEdit):
         super().mouseReleaseEvent(e)
 
     def draw_cursor(self):
-        if not self.hasFocus() or not self.cursor_on or self.history_view:
+        if not self.hasFocus() or not self.cursor_on:
             self.setExtraSelections([])
             return
 
-        row=max(0,min(self.scr.cursor.y,self.document().blockCount()-1))
+        # In copy mode the Qt document is the full scrollback snapshot. When
+        # that snapshot was created from the live page, translate the terminal
+        # cursor row into snapshot coordinates so the cursor can keep blinking
+        # while a selection remains highlighted.
+        if self.copy_mode:
+            row=self.copy_snapshot_current_start+self.scr.cursor.y
+        else:
+            if self.history_view:
+                self.setExtraSelections([])
+                return
+            row=self.scr.cursor.y
+
+        row=max(0,min(row,self.document().blockCount()-1))
         block=self.document().findBlockByNumber(row)
         if not block.isValid():
             self.setExtraSelections([])
@@ -734,7 +769,7 @@ class Term(QPlainTextEdit):
         # jump the viewport. The next real terminal input exits copy mode.
 
     def paste_clipboard(self):
-        self.end_copy_mode()
+        self.end_copy_mode(return_live=True)
         text = QApplication.clipboard().text()
         if not text:
             return
@@ -860,8 +895,11 @@ class Term(QPlainTextEdit):
         ):
             return
 
-        # Any real terminal input leaves selection snapshot mode first.
-        self.end_copy_mode()
+        # Any real terminal input leaves selection snapshot mode and returns
+        # to the newest terminal page before the keystroke is sent. Otherwise,
+        # starting a copy while paged back in history can leave the display
+        # parked at the old selection after typing resumes.
+        self.end_copy_mode(return_live=True)
 
         # Full-screen terminal apps (vi/vim, less, etc.) often enable
         # DECCKM "application cursor keys". In that mode xterm sends SS3
