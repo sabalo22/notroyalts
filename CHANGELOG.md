@@ -2,6 +2,12 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.4 - Unreleased
+
+### Changed
+
+- Reduced terminal scrollback history from 10,000 lines to 2,000 lines to keep routine SSH sessions lighter while retaining substantial history
+
 ## 1.1.3 - 2026-10-05
 
 ### Fixed
