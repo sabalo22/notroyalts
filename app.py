@@ -761,7 +761,28 @@ class Term(QPlainTextEdit):
 
         # Qt uses paragraph separators internally for multi-line selections.
         selected = cursor.selectedText().replace("\u2029", "\n")
+
+        # Preserve both the selection and viewport explicitly around the
+        # clipboard operation. On macOS, Cmd-C can cause QPlainTextEdit to
+        # repaint/focus-cycle in a way that drops our software cursor overlay
+        # even though copy mode itself remains active.
+        selection_start=cursor.selectionStart()
+        selection_end=cursor.selectionEnd()
+        scrollbar=self.verticalScrollBar()
+        scroll_value=scrollbar.value()
+
         QApplication.clipboard().setText(selected)
+
+        restored=QTextCursor(self.document())
+        restored.setPosition(selection_start)
+        restored.setPosition(selection_end,QTextCursor.KeepAnchor)
+        self.setTextCursor(restored)
+        scrollbar.setValue(scroll_value)
+
+        # Keep the terminal's software cursor visible while the copied
+        # selection remains highlighted.
+        self.cursor_on=True
+        QTimer.singleShot(0,self.draw_cursor)
 
         # Stay in copy mode after copying. Native terminals keep the selection
         # and viewport stable after Cmd-C/right-click Copy; dropping back to the
