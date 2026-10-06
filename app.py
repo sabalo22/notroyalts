@@ -602,35 +602,61 @@ class Term(QPlainTextEdit):
                 apply_run(run_start,cols,run_key)
 
 
-    def begin_copy_mode(self):
+    def begin_copy_mode(self,preserve_selection=False):
         if self.copy_mode or self.alt_screen or not hasattr(self.scr,"history"):
             return False
 
-        # Capture the user's current history viewport first. Then move pyte
-        # back to the live bottom before entering snapshot mode so the terminal
-        # cursor state remains authoritative while the static snapshot is shown.
-        rows,view_start=terminal_scrollback_rows(self.scr)
-        self.restore_live_history()
-        live_start=max(0,len(rows)-getattr(self.scr,"lines",0))
+        # Capture the existing visible-screen selection before replacing the
+        # Qt document with the full scrollback snapshot.
+        saved=None
+        if preserve_selection:
+            cur=self.textCursor()
+            if cur.hasSelection():
+                def row_col(pos):
+                    block=self.document().findBlock(pos)
+                    return block.blockNumber(),pos-block.position()
+                saved=(row_col(cur.anchor()),row_col(cur.position()))
 
+        rows,view_start=terminal_scrollback_rows(self.scr)
         text="\n".join(
             terminal_row_plain_text(row,self.scr.columns)
             for row in rows
         )
+
         self.copy_mode=True
         self.copy_snapshot_current_start=view_start
-        self.copy_snapshot_live_start=live_start
+        self.copy_snapshot_live_start=max(
+            0,len(rows)-getattr(self.scr,"lines",0)
+        )
         self.copy_snapshot_rows=rows
         self.setExtraSelections([])
         self.setPlainText(text)
         self.apply_rows_formatting(rows)
 
+        # Restore the original selection at the corresponding rows inside the
+        # expanded scrollback document.
+        if saved is not None:
+            (arow,acol),(prow,pcol)=saved
+            arow+=view_start
+            prow+=view_start
+
+            def doc_pos(row,col):
+                block=self.document().findBlockByNumber(
+                    max(0,min(row,self.document().blockCount()-1))
+                )
+                if not block.isValid():
+                    return 0
+                return block.position()+min(col,max(0,block.length()-1))
+
+            restored=QTextCursor(self.document())
+            restored.setPosition(doc_pos(arow,acol))
+            restored.setPosition(doc_pos(prow,pcol),QTextCursor.KeepAnchor)
+            self.setTextCursor(restored)
+
         # Keep the same logical history region in view after expanding the Qt
         # document from one screen to the complete scrollback snapshot.
         bar=self.verticalScrollBar()
         bar.setValue(min(bar.maximum(),max(bar.minimum(),view_start)))
-        self.cursor_on=True
-        QTimer.singleShot(0,self.draw_cursor)
         return True
 
     def restore_live_history(self):
@@ -667,33 +693,29 @@ class Term(QPlainTextEdit):
         self.render(force=True)
 
     def mousePressEvent(self,e):
-        if e.button()==Qt.LeftButton:
-            self.begin_copy_mode()
+        # Ordinary selection on the current screen stays on the live terminal.
+        # We only expand into full-scrollback copy mode if the user actually
+        # scrolls while a selection is active.
         super().mousePressEvent(e)
 
     def mouseReleaseEvent(self,e):
         super().mouseReleaseEvent(e)
 
     def draw_cursor(self):
-        if not self.hasFocus() or not self.cursor_on:
+        # While browsing a full scrollback snapshot there is no meaningful
+        # terminal cursor at that historical viewport. Do not draw a synthetic
+        # cursor there; the live cursor returns when copy mode ends.
+        if (
+            not self.hasFocus()
+            or not self.cursor_on
+            or self.copy_mode
+            or self.history_view
+            or bool(getattr(self.scr.cursor,"hidden",False))
+        ):
             self.setExtraSelections([])
             return
 
-        if self.copy_mode:
-            # begin_copy_mode() restores pyte to the live bottom before the
-            # snapshot is displayed, so cursor.y is the real live cursor. Map
-            # it onto the live-screen portion of the full snapshot.
-            if bool(getattr(self.scr.cursor,"hidden",False)):
-                self.setExtraSelections([])
-                return
-            row=self.copy_snapshot_live_start+self.scr.cursor.y
-        else:
-            if self.history_view or bool(getattr(self.scr.cursor,"hidden",False)):
-                self.setExtraSelections([])
-                return
-            row=self.scr.cursor.y
-
-        row=max(0,min(row,self.document().blockCount()-1))
+        row=max(0,min(self.scr.cursor.y,self.document().blockCount()-1))
         block=self.document().findBlockByNumber(row)
         if not block.isValid():
             self.setExtraSelections([])
@@ -787,15 +809,13 @@ class Term(QPlainTextEdit):
         if not cursor.hasSelection():
             return
 
-        # Qt uses paragraph separators internally for multi-line selections.
-        selected = cursor.selectedText().replace("\u2029", "\n")
+        selected = cursor.selectedText().replace("\u2029","\n")
         QApplication.clipboard().setText(selected)
 
-        # Keep the styled scrollback snapshot and viewport in place after Copy,
-        # matching normal terminal behavior. Real terminal input exits copy mode
-        # and returns to the newest live page.
-        self.cursor_on=True
-        QTimer.singleShot(0,self.draw_cursor)
+        # A full-scrollback snapshot is only needed to complete the copy. Once
+        # the clipboard has the data, return directly to the live terminal.
+        if self.copy_mode:
+            self.end_copy_mode(return_live=True)
 
     def paste_clipboard(self):
         self.end_copy_mode(return_live=True)
@@ -858,8 +878,12 @@ class Term(QPlainTextEdit):
         return True
 
     def wheelEvent(self,e):
-        # While selecting from the snapshot, let Qt scroll the expanded
-        # document normally so the selection can extend across many screens.
+        # Enter full-scrollback selection mode only when scrolling is actually
+        # needed for an active selection. This keeps normal one-screen
+        # selection entirely on the live terminal.
+        if not self.copy_mode and self.textCursor().hasSelection() and not self.alt_screen:
+            self.begin_copy_mode(preserve_selection=True)
+
         if self.copy_mode:
             return super().wheelEvent(e)
 
