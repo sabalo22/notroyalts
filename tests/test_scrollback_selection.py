@@ -40,5 +40,35 @@ class ScrollbackSnapshotTests(unittest.TestCase):
         self.assertEqual(screen.history.position,before)
 
 
+class CopyModeBehaviorTests(unittest.TestCase):
+    def test_copy_does_not_exit_copy_mode(self):
+        class FakeCursor:
+            def hasSelection(self):
+                return True
+            def selectedText(self):
+                return "one\u2029two"
+
+        class FakeClipboard:
+            def __init__(self):
+                self.value=None
+            def setText(self,value):
+                self.value=value
+
+        term=app.Term.__new__(app.Term)
+        term.copy_mode=True
+        term.textCursor=lambda: FakeCursor()
+        clipboard=FakeClipboard()
+
+        original=app.QApplication.clipboard
+        app.QApplication.clipboard=staticmethod(lambda: clipboard)
+        try:
+            app.Term.copy_selection(term)
+        finally:
+            app.QApplication.clipboard=original
+
+        self.assertTrue(term.copy_mode)
+        self.assertEqual(clipboard.value,"one\ntwo")
+
+
 if __name__=="__main__":
     unittest.main()
