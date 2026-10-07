@@ -2,6 +2,13 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.5 - Unreleased
+
+### Changed
+
+- Folder, connection, and search-result names now use case-insensitive natural sorting, so numbered names such as `stor9` appear before `stor10`.
+
+
 ## 1.1.4 - 2026-10-05
 
 ### Changed
