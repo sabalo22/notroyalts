@@ -11,9 +11,17 @@ import pyte,db
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.4"
+APP_VERSION="1.1.5"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
+
+def natural_sort_key(value):
+    """Case-insensitive natural sort key: stor9 sorts before stor10."""
+    text=str(value or "").casefold()
+    return tuple(
+        int(part) if part.isdigit() else part
+        for part in re.split(r"(\d+)",text)
+    )
 
 class CompatibleScreen(pyte.Screen):
     """pyte 0.8.2 compatibility for private CSI SGR sequences.
@@ -2160,7 +2168,7 @@ class Win(QMainWindow):
         self.tree.clear()
 
         if q:
-            for r in db.conns(q):
+            for r in sorted(db.conns(q),key=lambda r:natural_sort_key(r["name"])):
                 it=QTreeWidgetItem([r["name"]])
                 it.setData(0,KIND,"c")
                 it.setData(0,ID,r["id"])
@@ -2186,7 +2194,7 @@ class Win(QMainWindow):
         def sort_rows(rows):
             return sorted(
                 rows,
-                key=lambda r: (r["name"] or "").lower()
+                key=lambda r: natural_sort_key(r["name"])
             )
 
         def add_folder_row(r,parent_item=None):
@@ -2207,7 +2215,7 @@ class Win(QMainWindow):
         for r in sort_rows(roots):
             add_folder_row(r)
 
-        for r in db.conns():
+        for r in sorted(db.conns(),key=lambda r:natural_sort_key(r["name"])):
 
             it=QTreeWidgetItem([r["name"]])
             it.setData(0,KIND,"c")
