@@ -8,10 +8,11 @@ from PySide6.QtGui import QFont,QKeyEvent,QTextCursor,QTextCharFormat,QBrush,QCo
 from PySide6.QtWidgets import *
 from PySide6.QtWidgets import QTextEdit
 import pyte,db
+from pyte import modes as pyte_modes
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.5"
+APP_VERSION="1.1.6"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -23,7 +24,36 @@ def natural_sort_key(value):
         for part in re.split(r"(\d+)",text)
     )
 
-class CompatibleScreen(pyte.Screen):
+class SoftWrapTrackingMixin:
+    """Track rows continued by terminal auto-wrap.
+
+    pyte stores rendered rows but does not expose whether the transition to the
+    next row came from a real linefeed or DECAWM soft wrapping.  Keep that bit
+    of metadata on the row object itself so it follows the row into/out of
+    HistoryScreen scrollback.
+    """
+    def __init__(self,*args,**kwargs):
+        self._notroyalts_inside_draw=False
+        super().__init__(*args,**kwargs)
+
+    def draw(self,data):
+        self._notroyalts_inside_draw=True
+        try:
+            return super().draw(data)
+        finally:
+            self._notroyalts_inside_draw=False
+
+    def linefeed(self):
+        row=self.buffer[self.cursor.y]
+        # Screen.draw() invokes linefeed internally only when DECAWM wraps a
+        # full row. A parser-dispatched linefeed is a genuine line boundary.
+        row.notroyalts_soft_wrapped=bool(
+            self._notroyalts_inside_draw and pyte_modes.DECAWM in self.mode
+        )
+        return super().linefeed()
+
+
+class CompatibleScreen(SoftWrapTrackingMixin,pyte.Screen):
     """pyte 0.8.2 compatibility for private CSI SGR sequences.
 
     pyte's parser can dispatch SGR with private=True, but 0.8.2's
@@ -40,7 +70,7 @@ class CompatibleScreen(pyte.Screen):
         return super().select_graphic_rendition(*attrs)
 
 
-class CompatibleHistoryScreen(pyte.HistoryScreen):
+class CompatibleHistoryScreen(SoftWrapTrackingMixin,pyte.HistoryScreen):
     def select_graphic_rendition(self,*attrs,private=False):
         if private:
             return
@@ -119,6 +149,30 @@ def terminal_row_plain_text(row, columns):
             continue
         chars.append(getattr(ch,"data"," ") or " ")
     return "".join(chars).rstrip()
+
+
+def terminal_row_soft_wrapped(row):
+    """Whether this rendered row continues directly onto the next row."""
+    return bool(getattr(row,"notroyalts_soft_wrapped",False))
+
+
+def terminal_selection_plain_text(selected_text,rows,start_row):
+    """Convert a Qt selection to clipboard text without soft-wrap newlines."""
+    parts=selected_text.split("\u2029")
+    if len(parts)==1:
+        return selected_text
+
+    out=[parts[0]]
+    for offset,part in enumerate(parts[1:]):
+        row_index=start_row+offset
+        soft=(
+            0 <= row_index < len(rows)
+            and terminal_row_soft_wrapped(rows[row_index])
+        )
+        if not soft:
+            out.append("\n")
+        out.append(part)
+    return "".join(out)
 
 
 def terminal_scrollback_rows(screen):
@@ -861,7 +915,19 @@ class Term(QPlainTextEdit):
         if not cursor.hasSelection():
             return
 
-        selected = cursor.selectedText().replace("\u2029","\n")
+        if self.copy_mode and self.copy_snapshot_rows is not None:
+            rows=self.copy_snapshot_rows
+        else:
+            rows=[self.scr.buffer[y] for y in range(getattr(self.scr,"lines",0))]
+
+        start_block=self.document().findBlock(
+            cursor.selectionStart()
+        ).blockNumber()
+        selected=terminal_selection_plain_text(
+            cursor.selectedText(),
+            rows,
+            start_block,
+        )
         QApplication.clipboard().setText(selected)
 
         # Keep the full-scrollback snapshot in place after copying. Rebuilding
