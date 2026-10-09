@@ -2,6 +2,14 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.6 - Unreleased
+
+### Fixed
+
+- Copying terminal text no longer inserts hard newlines at visual soft-wrap boundaries.
+- Real remote line endings remain intact, preserving exact copied data such as PEM certificates, long commands, URLs, tokens, and hashes.
+
+
 ## 1.1.5 - Unreleased
 
 ### Changed
