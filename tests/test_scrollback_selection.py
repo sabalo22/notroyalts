@@ -47,6 +47,19 @@ class CopyModeBehaviorTests(unittest.TestCase):
                 return True
             def selectedText(self):
                 return "one\u2029two"
+            def selectionStart(self):
+                return 0
+
+        class FakeBlock:
+            def blockNumber(self):
+                return 0
+
+        class FakeDocument:
+            def findBlock(self,pos):
+                return FakeBlock()
+
+        class FakeRow:
+            notroyalts_soft_wrapped=False
 
         class FakeClipboard:
             def __init__(self):
@@ -56,7 +69,9 @@ class CopyModeBehaviorTests(unittest.TestCase):
 
         term=app.Term.__new__(app.Term)
         term.copy_mode=True
+        term.copy_snapshot_rows=[FakeRow(),FakeRow()]
         term.textCursor=lambda: FakeCursor()
+        term.document=lambda: FakeDocument()
         clipboard=FakeClipboard()
 
         original=app.QApplication.clipboard
