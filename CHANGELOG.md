@@ -2,6 +2,14 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.7 - Unreleased
+
+### Fixed
+
+- Duplicate Session now opens another local terminal when used on a local-terminal tab.
+- Clipboard copy trims fixed-width terminal padding spaces from the ends of selected rows while preserving logical newlines and soft-wrap handling.
+
+
 ## 1.1.6 - Unreleased
 
 ### Fixed
