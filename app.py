@@ -12,7 +12,7 @@ from pyte import modes as pyte_modes
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.6"
+APP_VERSION="1.1.7"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -157,10 +157,18 @@ def terminal_row_soft_wrapped(row):
 
 
 def terminal_selection_plain_text(selected_text,rows,start_row):
-    """Convert a Qt selection to clipboard text without soft-wrap newlines."""
+    """Convert a Qt selection to clipboard text without terminal artifacts.
+
+    QPlainTextEdit selections use U+2029 between rendered rows. Terminal rows
+    are fixed-width, so selections spanning lines can also contain right-edge
+    padding spaces that were never meaningful content. Trim those row-ending
+    blanks while preserving the v1.1.6 distinction between soft wraps and
+    genuine remote line endings.
+    """
     parts=selected_text.split("\u2029")
+    parts=[part.rstrip(" ") for part in parts]
     if len(parts)==1:
-        return selected_text
+        return parts[0]
 
     out=[parts[0]]
     for offset,part in enumerate(parts[1:]):
@@ -2361,8 +2369,14 @@ class Win(QMainWindow):
 
     def duplicateCurrentSession(self):
         term=self.activeTerm()
-        if term and term.connection_id is not None:
-            self.openConnection(term.connection_id)
+        if not term:
+            return
+
+        if term.connection_id is None:
+            self.openLocalTerminal()
+            return
+
+        self.openConnection(term.connection_id)
 
     def goToTab(self,index):
         if 0<=index<self.tabs.count():
