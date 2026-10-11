@@ -2,7 +2,7 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
-## 1.1.7 - Unreleased
+## 1.1.7 - 2026-10-11
 
 ### Fixed
 
