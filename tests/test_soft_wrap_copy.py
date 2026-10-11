@@ -52,6 +52,20 @@ class ClipboardReconstructionTests(unittest.TestCase):
             "abcdefghijk",
         )
 
+
+    def test_terminal_padding_spaces_are_removed(self):
+        screen=app.CompatibleHistoryScreen(20,3,history=20,ratio=0.5)
+        stream=pyte.Stream(screen)
+        stream.feed("first line\r\nsecond line")
+
+        rows=[screen.buffer[y] for y in range(screen.lines)]
+        selected="first line          \u2029second line         "
+
+        self.assertEqual(
+            app.terminal_selection_plain_text(selected,rows,0),
+            "first line\nsecond line",
+        )
+
     def test_real_line_endings_are_preserved(self):
         screen=app.CompatibleHistoryScreen(10,3,history=20,ratio=0.5)
         stream=pyte.Stream(screen)
