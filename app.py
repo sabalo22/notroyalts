@@ -210,6 +210,17 @@ def terminal_cursor_document_row(copy_mode,history_view,live_start,cursor_y):
     return max(0,int(cursor_y))
 
 
+def terminal_cursor_state(copy_mode,live_y,live_x,live_hidden,cursor):
+    """Return the cursor state that should be painted in the current document."""
+    if copy_mode:
+        return int(live_y),int(live_x),bool(live_hidden)
+    return (
+        int(getattr(cursor,"y",0)),
+        int(getattr(cursor,"x",0)),
+        bool(getattr(cursor,"hidden",False)),
+    )
+
+
 def sshargs(r):
     a=["/usr/bin/ssh"]
     if int(r["port"] or 22)!=22:a+=["-p",str(r["port"])]
@@ -830,19 +841,15 @@ class Term(QPlainTextEdit):
 
     def cursor_document_position(self):
         """Return a QTextCursor at the terminal cursor's document position."""
-        if self.copy_mode:
-            # Use the cursor remembered from the newest terminal page. The
-            # current pyte cursor may be hidden because HistoryScreen was paged
-            # back before the selection entered full-scrollback copy mode.
-            if self.live_cursor_hidden:
-                return None
-            cursor_y=self.live_cursor_y
-            cursor_x=self.live_cursor_x
-        else:
-            if bool(getattr(self.scr.cursor,"hidden",False)):
-                return None
-            cursor_y=self.scr.cursor.y
-            cursor_x=self.scr.cursor.x
+        cursor_y,cursor_x,cursor_hidden=terminal_cursor_state(
+            self.copy_mode,
+            self.live_cursor_y,
+            self.live_cursor_x,
+            self.live_cursor_hidden,
+            self.scr.cursor,
+        )
+        if cursor_hidden:
+            return None
 
         row=terminal_cursor_document_row(
             self.copy_mode,
