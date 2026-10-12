@@ -201,6 +201,15 @@ def terminal_scrollback_snapshot(screen):
     lines=[terminal_row_plain_text(row,screen.columns) for row in rows]
     return "\n".join(lines),current_start
 
+def terminal_cursor_document_row(copy_mode,history_view,live_start,cursor_y):
+    """Map the live terminal cursor row into the current Qt document."""
+    if copy_mode:
+        return max(0,int(live_start)+int(cursor_y))
+    if history_view:
+        return None
+    return max(0,int(cursor_y))
+
+
 def sshargs(r):
     a=["/usr/bin/ssh"]
     if int(r["port"] or 22)!=22:a+=["-p",str(r["port"])]
@@ -808,16 +817,14 @@ class Term(QPlainTextEdit):
         if bool(getattr(self.scr.cursor,"hidden",False)):
             return None
 
-        if self.copy_mode:
-            # The full-scrollback snapshot contains history rows followed by
-            # the newest live screen. Keep the software cursor visible by
-            # mapping its live-screen row into that expanded document instead
-            # of suppressing it for the entire duration of copy mode.
-            row=self.copy_snapshot_live_start+self.scr.cursor.y
-        else:
-            if self.history_view:
-                return None
-            row=self.scr.cursor.y
+        row=terminal_cursor_document_row(
+            self.copy_mode,
+            self.history_view,
+            self.copy_snapshot_live_start,
+            self.scr.cursor.y,
+        )
+        if row is None:
+            return None
 
         row=max(0,min(row,self.document().blockCount()-1))
         block=self.document().findBlockByNumber(row)
