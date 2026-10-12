@@ -12,7 +12,7 @@ from pyte import modes as pyte_modes
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.7"
+APP_VERSION="1.1.8"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -804,15 +804,22 @@ class Term(QPlainTextEdit):
         super().mouseReleaseEvent(e)
 
     def cursor_document_position(self):
-        """Return a QTextCursor at the live terminal cursor position."""
-        if (
-            self.copy_mode
-            or self.history_view
-            or bool(getattr(self.scr.cursor,"hidden",False))
-        ):
+        """Return a QTextCursor at the terminal cursor's document position."""
+        if bool(getattr(self.scr.cursor,"hidden",False)):
             return None
 
-        row=max(0,min(self.scr.cursor.y,self.document().blockCount()-1))
+        if self.copy_mode:
+            # The full-scrollback snapshot contains history rows followed by
+            # the newest live screen. Keep the software cursor visible by
+            # mapping its live-screen row into that expanded document instead
+            # of suppressing it for the entire duration of copy mode.
+            row=self.copy_snapshot_live_start+self.scr.cursor.y
+        else:
+            if self.history_view:
+                return None
+            row=self.scr.cursor.y
+
+        row=max(0,min(row,self.document().blockCount()-1))
         block=self.document().findBlockByNumber(row)
         if not block.isValid():
             return None
