@@ -272,6 +272,13 @@ class Term(QPlainTextEdit):
         # Solid terminal cursor. Avoid periodically repainting the cursor with
         # ExtraSelections while the user is making a text selection.
         self.cursor_on=True
+        # Remember the last cursor coordinates from the newest/live terminal
+        # page. pyte hides/moves its cursor while paging through HistoryScreen,
+        # but the full scrollback-copy snapshot still needs to draw the real
+        # live cursor at the bottom of the document.
+        self.live_cursor_y=0
+        self.live_cursor_x=0
+        self.live_cursor_hidden=False
         self.cursor_timer=QTimer(self)
 
         self.process_timer=QTimer(self)
@@ -591,6 +598,15 @@ class Term(QPlainTextEdit):
         self.alt_screen = False
 
     def render(self,force=False):
+        # Remember the cursor only while pyte is on the newest live page.
+        # HistoryScreen deliberately marks its cursor hidden while paged back,
+        # so reading self.scr.cursor later from scrollback would lose the live
+        # cursor state we actually want to paint.
+        if not self.copy_mode and not self.history_view:
+            self.live_cursor_y=int(getattr(self.scr.cursor,"y",0))
+            self.live_cursor_x=int(getattr(self.scr.cursor,"x",0))
+            self.live_cursor_hidden=bool(getattr(self.scr.cursor,"hidden",False))
+
         # Do not rebuild the Qt document while the user is selecting from the
         # full scrollback snapshot. PTY output continues to update pyte in the
         # background and is rendered as soon as copy mode ends.
@@ -814,14 +830,25 @@ class Term(QPlainTextEdit):
 
     def cursor_document_position(self):
         """Return a QTextCursor at the terminal cursor's document position."""
-        if bool(getattr(self.scr.cursor,"hidden",False)):
-            return None
+        if self.copy_mode:
+            # Use the cursor remembered from the newest terminal page. The
+            # current pyte cursor may be hidden because HistoryScreen was paged
+            # back before the selection entered full-scrollback copy mode.
+            if self.live_cursor_hidden:
+                return None
+            cursor_y=self.live_cursor_y
+            cursor_x=self.live_cursor_x
+        else:
+            if bool(getattr(self.scr.cursor,"hidden",False)):
+                return None
+            cursor_y=self.scr.cursor.y
+            cursor_x=self.scr.cursor.x
 
         row=terminal_cursor_document_row(
             self.copy_mode,
             self.history_view,
             self.copy_snapshot_live_start,
-            self.scr.cursor.y,
+            cursor_y,
         )
         if row is None:
             return None
@@ -831,7 +858,7 @@ class Term(QPlainTextEdit):
         if not block.isValid():
             return None
 
-        col=max(0,min(self.scr.cursor.x,max(0,block.length()-1)))
+        col=max(0,min(cursor_x,max(0,block.length()-1)))
         c=QTextCursor(self.document())
         c.setPosition(block.position()+col)
         return c
