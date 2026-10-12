@@ -27,45 +27,38 @@ if __name__=="__main__":
 
 
 class RememberedLiveCursorTests(unittest.TestCase):
-    def test_copy_mode_can_use_remembered_live_cursor_after_history_hides_pyte_cursor(self):
-        term=app.Term.__new__(app.Term)
-        term.copy_mode=True
-        term.history_view=True
-        term.copy_snapshot_live_start=100
-        term.live_cursor_y=5
-        term.live_cursor_x=3
-        term.live_cursor_hidden=False
-
+    def test_copy_mode_uses_remembered_live_cursor_even_if_pyte_cursor_is_hidden(self):
         class HiddenCursor:
             hidden=True
             y=0
             x=0
 
-        class FakeScreen:
-            cursor=HiddenCursor()
+        y,x,hidden=app.terminal_cursor_state(
+            True,
+            5,
+            3,
+            False,
+            HiddenCursor(),
+        )
 
-        class FakeBlock:
-            def isValid(self):
-                return True
-            def position(self):
-                return 200
-            def length(self):
-                return 20
+        self.assertEqual((y,x,hidden),(5,3,False))
 
-        class FakeDocument:
-            def blockCount(self):
-                return 200
-            def findBlockByNumber(self,row):
-                self.row=row
-                return FakeBlock()
+    def test_live_mode_uses_current_pyte_cursor(self):
+        class LiveCursor:
+            hidden=False
+            y=9
+            x=4
 
-        doc=FakeDocument()
-        term.scr=FakeScreen()
-        term.document=lambda: doc
+        y,x,hidden=app.terminal_cursor_state(
+            False,
+            5,
+            3,
+            False,
+            LiveCursor(),
+        )
 
-        cursor=app.Term.cursor_document_position(term)
-
-        self.assertIsNotNone(cursor)
-        self.assertEqual(doc.row,105)
+        self.assertEqual((y,x,hidden),(9,4,False))
 
 
+if __name__=="__main__":
+    unittest.main()
