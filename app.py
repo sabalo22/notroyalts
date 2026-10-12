@@ -12,7 +12,7 @@ from pyte import modes as pyte_modes
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.7"
+APP_VERSION="1.1.8"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -201,6 +201,26 @@ def terminal_scrollback_snapshot(screen):
     lines=[terminal_row_plain_text(row,screen.columns) for row in rows]
     return "\n".join(lines),current_start
 
+def terminal_cursor_document_row(copy_mode,history_view,live_start,cursor_y):
+    """Map the live terminal cursor row into the current Qt document."""
+    if copy_mode:
+        return max(0,int(live_start)+int(cursor_y))
+    if history_view:
+        return None
+    return max(0,int(cursor_y))
+
+
+def terminal_cursor_state(copy_mode,live_y,live_x,live_hidden,cursor):
+    """Return the cursor state that should be painted in the current document."""
+    if copy_mode:
+        return int(live_y),int(live_x),bool(live_hidden)
+    return (
+        int(getattr(cursor,"y",0)),
+        int(getattr(cursor,"x",0)),
+        bool(getattr(cursor,"hidden",False)),
+    )
+
+
 def sshargs(r):
     a=["/usr/bin/ssh"]
     if int(r["port"] or 22)!=22:a+=["-p",str(r["port"])]
@@ -263,6 +283,13 @@ class Term(QPlainTextEdit):
         # Solid terminal cursor. Avoid periodically repainting the cursor with
         # ExtraSelections while the user is making a text selection.
         self.cursor_on=True
+        # Remember the last cursor coordinates from the newest/live terminal
+        # page. pyte hides/moves its cursor while paging through HistoryScreen,
+        # but the full scrollback-copy snapshot still needs to draw the real
+        # live cursor at the bottom of the document.
+        self.live_cursor_y=0
+        self.live_cursor_x=0
+        self.live_cursor_hidden=False
         self.cursor_timer=QTimer(self)
 
         self.process_timer=QTimer(self)
@@ -582,6 +609,15 @@ class Term(QPlainTextEdit):
         self.alt_screen = False
 
     def render(self,force=False):
+        # Remember the cursor only while pyte is on the newest live page.
+        # HistoryScreen deliberately marks its cursor hidden while paged back,
+        # so reading self.scr.cursor later from scrollback would lose the live
+        # cursor state we actually want to paint.
+        if not self.copy_mode and not self.history_view:
+            self.live_cursor_y=int(getattr(self.scr.cursor,"y",0))
+            self.live_cursor_x=int(getattr(self.scr.cursor,"x",0))
+            self.live_cursor_hidden=bool(getattr(self.scr.cursor,"hidden",False))
+
         # Do not rebuild the Qt document while the user is selecting from the
         # full scrollback snapshot. PTY output continues to update pyte in the
         # background and is rendered as soon as copy mode ends.
@@ -804,20 +840,32 @@ class Term(QPlainTextEdit):
         super().mouseReleaseEvent(e)
 
     def cursor_document_position(self):
-        """Return a QTextCursor at the live terminal cursor position."""
-        if (
-            self.copy_mode
-            or self.history_view
-            or bool(getattr(self.scr.cursor,"hidden",False))
-        ):
+        """Return a QTextCursor at the terminal cursor's document position."""
+        cursor_y,cursor_x,cursor_hidden=terminal_cursor_state(
+            self.copy_mode,
+            self.live_cursor_y,
+            self.live_cursor_x,
+            self.live_cursor_hidden,
+            self.scr.cursor,
+        )
+        if cursor_hidden:
             return None
 
-        row=max(0,min(self.scr.cursor.y,self.document().blockCount()-1))
+        row=terminal_cursor_document_row(
+            self.copy_mode,
+            self.history_view,
+            self.copy_snapshot_live_start,
+            cursor_y,
+        )
+        if row is None:
+            return None
+
+        row=max(0,min(row,self.document().blockCount()-1))
         block=self.document().findBlockByNumber(row)
         if not block.isValid():
             return None
 
-        col=max(0,min(self.scr.cursor.x,max(0,block.length()-1)))
+        col=max(0,min(cursor_x,max(0,block.length()-1)))
         c=QTextCursor(self.document())
         c.setPosition(block.position()+col)
         return c

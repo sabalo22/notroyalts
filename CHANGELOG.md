@@ -2,6 +2,13 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.1.8 - Unreleased
+
+### Fixed
+
+- The software cursor remains visible when the full-scrollback copy snapshot is active and the live cursor row is on screen, without exiting copy mode or reintroducing the old redraw jump.
+
+
 ## 1.1.7 - 2026-10-11
 
 ### Fixed
