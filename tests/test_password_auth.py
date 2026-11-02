@@ -3,6 +3,21 @@ import unittest
 import app
 
 
+class PasswordPromptTests(unittest.TestCase):
+    def test_standard_openssh_password_prompt_is_detected(self):
+        self.assertTrue(
+            app.password_prompt_ready("admin@example.com's password: ")
+        )
+
+    def test_split_prompt_tail_is_detected_after_join(self):
+        tail="admin@example.com's pass"
+        tail=(tail+"word: ")[-512:]
+        self.assertTrue(app.password_prompt_ready(tail))
+
+    def test_non_auth_password_prompt_is_not_overbroad(self):
+        self.assertFalse(app.password_prompt_ready("Password policy updated."))
+
+
 class SSHAuthenticationArgsTests(unittest.TestCase):
     def base_connection(self,**overrides):
         data={
