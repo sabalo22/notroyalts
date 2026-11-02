@@ -22,10 +22,24 @@ def c():
     APP.mkdir(parents=True,exist_ok=True)
     x=sqlite3.connect(DB); x.row_factory=sqlite3.Row; x.execute("PRAGMA foreign_keys=ON"); return x
 def init():
-    with c() as x:x.executescript("""
-    CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY,name TEXT NOT NULL,parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,sort_order INTEGER DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS connections(id INTEGER PRIMARY KEY,name TEXT NOT NULL,folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,host TEXT NOT NULL,port INTEGER DEFAULT 22,username TEXT NOT NULL,identity_file TEXT,proxy_jump TEXT,extra_args TEXT,notes TEXT,sort_order INTEGER DEFAULT 0);
-    """)
+    with c() as x:
+        x.executescript("""
+        CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY,name TEXT NOT NULL,parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,sort_order INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS connections(id INTEGER PRIMARY KEY,name TEXT NOT NULL,folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,host TEXT NOT NULL,port INTEGER DEFAULT 22,username TEXT NOT NULL,auth_method TEXT NOT NULL DEFAULT 'key',identity_file TEXT,proxy_jump TEXT,extra_args TEXT,notes TEXT,sort_order INTEGER DEFAULT 0);
+        """)
+
+        # Existing NotRoyalTs databases predate per-connection authentication
+        # mode. Add the column in place and preserve all current connections as
+        # SSH-key connections for backward compatibility.
+        columns={
+            row["name"]
+            for row in x.execute("PRAGMA table_info(connections)").fetchall()
+        }
+        if "auth_method" not in columns:
+            x.execute(
+                "ALTER TABLE connections "
+                "ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'key'"
+            )
 def folders():
     with c() as x:
         return x.execute(
@@ -45,10 +59,38 @@ def rename_folder(i,n):
 def del_folder(i):
     with c() as x:x.execute("DELETE FROM folders WHERE id=?",(i,))
 def save_conn(d,i=None):
-    vals=(d["name"],d.get("folder_id"),d["host"],d["port"],d["username"],d.get("identity_file") or None,d.get("proxy_jump") or None,d.get("extra_args") or None,d.get("notes") or None)
+    auth_method=str(d.get("auth_method") or "key").strip().lower()
+    if auth_method not in ("key","password"):
+        auth_method="key"
+
+    vals=(
+        d["name"],
+        d.get("folder_id"),
+        d["host"],
+        d["port"],
+        d["username"],
+        auth_method,
+        d.get("identity_file") or None,
+        d.get("proxy_jump") or None,
+        d.get("extra_args") or None,
+        d.get("notes") or None,
+    )
     with c() as x:
-        if i:x.execute("UPDATE connections SET name=?,folder_id=?,host=?,port=?,username=?,identity_file=?,proxy_jump=?,extra_args=?,notes=? WHERE id=?",vals+(i,))
-        else:x.execute("INSERT INTO connections(name,folder_id,host,port,username,identity_file,proxy_jump,extra_args,notes) VALUES(?,?,?,?,?,?,?,?,?)",vals)
+        if i:
+            x.execute(
+                "UPDATE connections SET "
+                "name=?,folder_id=?,host=?,port=?,username=?,auth_method=?,"
+                "identity_file=?,proxy_jump=?,extra_args=?,notes=? WHERE id=?",
+                vals+(i,)
+            )
+        else:
+            x.execute(
+                "INSERT INTO connections("
+                "name,folder_id,host,port,username,auth_method,identity_file,"
+                "proxy_jump,extra_args,notes"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?)",
+                vals
+            )
 def del_conn(i):
     with c() as x:x.execute("DELETE FROM connections WHERE id=?",(i,))
 
