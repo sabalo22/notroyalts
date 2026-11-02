@@ -39,7 +39,12 @@ def get_password(connection_id):
 
 
 def has_password(connection_id):
-    return get_password(connection_id) is not None
+    result=_security([
+        "find-generic-password",
+        "-a",_account(connection_id),
+        "-s",KEYCHAIN_SERVICE,
+    ])
+    return result.returncode == 0
 
 
 def set_password(connection_id,password,label=None):
