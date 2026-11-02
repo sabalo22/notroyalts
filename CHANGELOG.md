@@ -2,6 +2,19 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.2.0 - Unreleased
+
+### Added
+
+- Per-connection authentication mode with **SSH Key** and **Password (prompt)** options.
+- Password-authenticated sessions use the normal interactive OpenSSH password prompt; NotRoyalTs does not store SSH passwords.
+
+### Changed
+
+- Existing connections migrate automatically to SSH Key authentication mode.
+- Backup export/import now preserves authentication mode while continuing to exclude credentials and private-key contents.
+
+
 ## 1.1.8 - Unreleased
 
 ### Fixed
