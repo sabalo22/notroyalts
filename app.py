@@ -12,7 +12,7 @@ from pyte import modes as pyte_modes
 import app_lock
 
 APP_NAME="NotRoyalTs"
-APP_VERSION="1.1.8"
+APP_VERSION="1.2.0"
 
 KIND=Qt.UserRole; ID=Qt.UserRole+1
 
@@ -223,11 +223,25 @@ def terminal_cursor_state(copy_mode,live_y,live_x,live_hidden,cursor):
 
 def sshargs(r):
     a=["/usr/bin/ssh"]
-    if int(r["port"] or 22)!=22:a+=["-p",str(r["port"])]
-    if r["identity_file"]:a+=["-i",os.path.expanduser(r["identity_file"])]
-    if r["proxy_jump"]:a+=["-J",r["proxy_jump"]]
-    if r["extra_args"]:a+=shlex.split(r["extra_args"])
-    a+=[f'{r["username"]}@{r["host"]}'];return a
+    if int(r["port"] or 22)!=22:
+        a+=["-p",str(r["port"])]
+
+    auth_method=str(r["auth_method"] or "key").strip().lower()
+    if auth_method=="password":
+        # Keep password handling inside the real OpenSSH PTY prompt. Explicitly
+        # disable public-key attempts so ssh-agent/default keys do not preempt
+        # or delay a password-auth connection.
+        a+=["-o","PubkeyAuthentication=no"]
+        a+=["-o","PreferredAuthentications=keyboard-interactive,password"]
+    elif r["identity_file"]:
+        a+=["-i",os.path.expanduser(r["identity_file"])]
+
+    if r["proxy_jump"]:
+        a+=["-J",r["proxy_jump"]]
+    if r["extra_args"]:
+        a+=shlex.split(r["extra_args"])
+    a+=[f'{r["username"]}@{r["host"]}']
+    return a
 
 class Term(QPlainTextEdit):
     sessionEnded = Signal()
@@ -1293,6 +1307,11 @@ class ConnDialog(QDialog):
         for i,n in folders:self.folder.addItem(n,i)
         self.host=QLineEdit();self.port=QSpinBox();self.port.setRange(1,65535);self.port.setValue(22)
         self.user=QLineEdit()
+
+        self.auth=QComboBox()
+        self.auth.addItem("SSH Key","key")
+        self.auth.addItem("Password (prompt)","password")
+
         self.key=QLineEdit()
 
         self.key_browse=QPushButton("Browse…")
@@ -1313,17 +1332,30 @@ class ConnDialog(QDialog):
             ("Host/IP",self.host),
             ("Port",self.port),
             ("Username",self.user),
+            ("Authentication",self.auth),
             ("SSH key",key_row),
             ("ProxyJump",self.jump),
             ("Extra SSH args",self.extra),
             ("Notes",self.notes)
         ]:
             f.addRow(label,w)
+        self.auth.currentIndexChanged.connect(self.update_auth_controls)
+        self.update_auth_controls()
+
         b=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel);b.accepted.connect(self.accept);b.rejected.connect(self.reject);f.addRow(b)
         if row:
             self.name.setText(row["name"]);self.host.setText(row["host"]);self.port.setValue(row["port"]);self.user.setText(row["username"]);self.key.setText(row["identity_file"] or "");self.jump.setText(row["proxy_jump"] or "");self.extra.setText(row["extra_args"] or "");self.notes.setPlainText(row["notes"] or "")
+            auth_method=row["auth_method"] or "key"
+            auth_index=self.auth.findData(auth_method)
+            if auth_index>=0:self.auth.setCurrentIndex(auth_index)
             i=self.folder.findData(row["folder_id"])
             if i>=0:self.folder.setCurrentIndex(i)
+            self.update_auth_controls()
+    def update_auth_controls(self):
+        use_key=self.auth.currentData()=="key"
+        self.key.setEnabled(use_key)
+        self.key_browse.setEnabled(use_key)
+
     def browse_key(self):
         start_dir=str(Path.home()/".ssh")
         path,_=QFileDialog.getOpenFileName(
@@ -1338,7 +1370,7 @@ class ConnDialog(QDialog):
                 path="~/" + path[len(home)+1:]
             self.key.setText(path)
 
-    def data(self):return {"name":self.name.text(),"folder_id":self.folder.currentData(),"host":self.host.text(),"port":self.port.value(),"username":self.user.text(),"identity_file":self.key.text(),"proxy_jump":self.jump.text(),"extra_args":self.extra.text(),"notes":self.notes.toPlainText()}
+    def data(self):return {"name":self.name.text(),"folder_id":self.folder.currentData(),"host":self.host.text(),"port":self.port.value(),"username":self.user.text(),"auth_method":self.auth.currentData() or "key","identity_file":self.key.text(),"proxy_jump":self.jump.text(),"extra_args":self.extra.text(),"notes":self.notes.toPlainText()}
 
 
 def app_lock_enabled():
@@ -1795,6 +1827,7 @@ class Win(QMainWindow):
                 "host": r["host"],
                 "port": int(r["port"] or 22),
                 "username": r["username"],
+                "auth_method": r["auth_method"] or "key",
                 "identity_file": r["identity_file"] or "",
                 "proxy_jump": r["proxy_jump"] or "",
                 "extra_args": r["extra_args"] or "",
@@ -1831,8 +1864,8 @@ class Win(QMainWindow):
                 f"Folders: {len(folders)}\\n"
                 f"Connections: {len(connections)}\\n\\n"
                 f"{path}\\n\\n"
-                "SSH private key files are NOT embedded in the backup. "
-                "Only their configured paths are exported."
+                "SSH private key files and SSH passwords are NOT embedded "
+                "in the backup. Only key paths and authentication mode are exported."
             )
         )
 
@@ -1960,6 +1993,11 @@ class Win(QMainWindow):
                     "host": host,
                     "port": port,
                     "username": username,
+                    "auth_method": (
+                        c.get("auth_method")
+                        if c.get("auth_method") in ("key","password")
+                        else "key"
+                    ),
                     "identity_file": c.get("identity_file") or "",
                     "proxy_jump": c.get("proxy_jump") or "",
                     "extra_args": c.get("extra_args") or "",
@@ -1985,8 +2023,8 @@ class Win(QMainWindow):
                 f"Folders reused: {folders_reused}\\n"
                 f"Connections imported: {connections_created}\\n"
                 f"Existing connections skipped: {connections_skipped}\\n\\n"
-                "SSH key files themselves are not part of the backup; "
-                "their configured paths were restored."
+                "SSH key files and passwords are not part of the backup; "
+                "key paths and authentication mode were restored."
             )
         )
 
@@ -2514,6 +2552,7 @@ class Win(QMainWindow):
             "host":row["host"],
             "port":row["port"],
             "username":row["username"],
+            "auth_method":row["auth_method"] or "key",
             "identity_file":row["identity_file"] or "",
             "proxy_jump":row["proxy_jump"] or "",
             "extra_args":row["extra_args"] or "",
@@ -2525,7 +2564,11 @@ class Win(QMainWindow):
         d.host.setText(data["host"])
         d.port.setValue(int(data["port"] or 22))
         d.user.setText(data["username"])
+        auth_index=d.auth.findData(data["auth_method"])
+        if auth_index>=0:
+            d.auth.setCurrentIndex(auth_index)
         d.key.setText(data["identity_file"])
+        d.update_auth_controls()
         d.jump.setText(data["proxy_jump"])
         d.extra.setText(data["extra_args"])
         d.notes.setPlainText(data["notes"])
