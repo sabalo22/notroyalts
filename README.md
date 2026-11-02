@@ -11,7 +11,9 @@ It uses the system `/usr/bin/ssh` client under a real PTY. NotRoyalTs does not
 implement SSH cryptography itself and does not copy private keys into its
 database.
 
-> **Current source version:** `v1.1.8`.
+For password-authenticated connections, NotRoyalTs does not store the SSH password. The password is entered directly into the normal OpenSSH prompt when the session starts.
+
+> **Current source version:** `v1.2.0`.
 >
 > **Primary target:** Apple Silicon Macs (`arm64`). The run and build scripts
 > intentionally reject Rosetta on Apple Silicon so NotRoyalTs is not
@@ -24,6 +26,7 @@ database.
 - Local terminal tabs
 - Connection search
 - Custom SSH ports
+- Per-connection SSH key or interactive password authentication
 - External private-key paths
 - `ProxyJump` support
 - Extra SSH arguments
