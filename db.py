@@ -83,14 +83,15 @@ def save_conn(d,i=None):
                 "identity_file=?,proxy_jump=?,extra_args=?,notes=? WHERE id=?",
                 vals+(i,)
             )
-        else:
-            x.execute(
-                "INSERT INTO connections("
-                "name,folder_id,host,port,username,auth_method,identity_file,"
-                "proxy_jump,extra_args,notes"
-                ") VALUES(?,?,?,?,?,?,?,?,?,?)",
-                vals
-            )
+            return int(i)
+        cur=x.execute(
+            "INSERT INTO connections("
+            "name,folder_id,host,port,username,auth_method,identity_file,"
+            "proxy_jump,extra_args,notes"
+            ") VALUES(?,?,?,?,?,?,?,?,?,?)",
+            vals
+        )
+        return int(cur.lastrowid)
 def del_conn(i):
     with c() as x:x.execute("DELETE FROM connections WHERE id=?",(i,))
 
