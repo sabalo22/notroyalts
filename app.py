@@ -9,7 +9,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtWidgets import QTextEdit
 import pyte,db
 from pyte import modes as pyte_modes
-import app_lock
+import app_lock,ssh_credentials
 
 APP_NAME="NotRoyalTs"
 APP_VERSION="1.2.0"
@@ -221,6 +221,19 @@ def terminal_cursor_state(copy_mode,live_y,live_x,live_hidden,cursor):
     )
 
 
+def password_prompt_ready(text):
+    """Return True when terminal output ends at an SSH password prompt."""
+    if not text:
+        return False
+
+    # Strip common CSI/OSC terminal control sequences before matching. OpenSSH
+    # normally emits a plain prompt, but this keeps the detector tolerant of
+    # shell/terminal decoration around it.
+    clean=re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]","",text)
+    clean=re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)","",clean)
+    return re.search(r"(?i)(?:password|passcode):\s*$",clean) is not None
+
+
 def sshargs(r):
     a=["/usr/bin/ssh"]
     if int(r["port"] or 22)!=22:
@@ -245,10 +258,13 @@ def sshargs(r):
 
 class Term(QPlainTextEdit):
     sessionEnded = Signal()
-    def __init__(self,args,connection_id=None):
+    def __init__(self,args,connection_id=None,auth_password=None):
         super().__init__()
         self.args=args
         self.connection_id=connection_id
+        self.auth_password=auth_password
+        self.password_prompt_tail=""
+        self.password_sent=False
         self.fd=None
         self.pid=None
         self.scr=CompatibleHistoryScreen(120,35,history=2000,ratio=0.10)
@@ -594,8 +610,20 @@ class Term(QPlainTextEdit):
             work = work[pos + len(token):]
 
     def feed_terminal_bytes(self, data):
-        if data:
-            self.stream.feed(data.decode("utf-8", errors="replace"))
+        if not data:
+            return
+
+        text=data.decode("utf-8", errors="replace")
+        self.stream.feed(text)
+
+        if self.auth_password and not self.password_sent:
+            self.password_prompt_tail=(self.password_prompt_tail+text)[-512:]
+            if password_prompt_ready(self.password_prompt_tail):
+                password=self.auth_password
+                self.auth_password=None
+                self.password_sent=True
+                self.password_prompt_tail=""
+                self.send(password.encode("utf-8")+b"\r")
 
     def enter_alt_screen(self):
         if self.alt_screen:
@@ -1310,7 +1338,20 @@ class ConnDialog(QDialog):
 
         self.auth=QComboBox()
         self.auth.addItem("SSH Key","key")
-        self.auth.addItem("Password (prompt)","password")
+        self.auth.addItem("Password","password")
+
+        self.password_saved=False
+        self.password=QLineEdit()
+        self.password.setEchoMode(QLineEdit.Password)
+        self.password.setPlaceholderText("Enter SSH password")
+        self.save_password=QCheckBox("Save password in macOS Keychain")
+        self.save_password.setChecked(True)
+
+        password_row=QWidget()
+        password_layout=QVBoxLayout(password_row)
+        password_layout.setContentsMargins(0,0,0,0)
+        password_layout.addWidget(self.password)
+        password_layout.addWidget(self.save_password)
 
         self.key=QLineEdit()
 
@@ -1333,6 +1374,7 @@ class ConnDialog(QDialog):
             ("Port",self.port),
             ("Username",self.user),
             ("Authentication",self.auth),
+            ("Password",password_row),
             ("SSH key",key_row),
             ("ProxyJump",self.jump),
             ("Extra SSH args",self.extra),
@@ -1348,13 +1390,28 @@ class ConnDialog(QDialog):
             auth_method=row["auth_method"] or "key"
             auth_index=self.auth.findData(auth_method)
             if auth_index>=0:self.auth.setCurrentIndex(auth_index)
+
+            if auth_method=="password":
+                try:
+                    self.password_saved=ssh_credentials.has_password(row["id"])
+                except ssh_credentials.KeychainError:
+                    self.password_saved=False
+                if self.password_saved:
+                    self.password.setPlaceholderText(
+                        "Saved in macOS Keychain — leave blank to keep"
+                    )
+                    self.save_password.setChecked(True)
+
             i=self.folder.findData(row["folder_id"])
             if i>=0:self.folder.setCurrentIndex(i)
             self.update_auth_controls()
     def update_auth_controls(self):
         use_key=self.auth.currentData()=="key"
+        use_password=not use_key
         self.key.setEnabled(use_key)
         self.key_browse.setEnabled(use_key)
+        self.password.setEnabled(use_password)
+        self.save_password.setEnabled(use_password)
 
     def browse_key(self):
         start_dir=str(Path.home()/".ssh")
@@ -1370,7 +1427,7 @@ class ConnDialog(QDialog):
                 path="~/" + path[len(home)+1:]
             self.key.setText(path)
 
-    def data(self):return {"name":self.name.text(),"folder_id":self.folder.currentData(),"host":self.host.text(),"port":self.port.value(),"username":self.user.text(),"auth_method":self.auth.currentData() or "key","identity_file":self.key.text(),"proxy_jump":self.jump.text(),"extra_args":self.extra.text(),"notes":self.notes.toPlainText()}
+    def data(self):return {"name":self.name.text(),"folder_id":self.folder.currentData(),"host":self.host.text(),"port":self.port.value(),"username":self.user.text(),"auth_method":self.auth.currentData() or "key","password":self.password.text(),"save_password":self.save_password.isChecked(),"identity_file":self.key.text(),"proxy_jump":self.jump.text(),"extra_args":self.extra.text(),"notes":self.notes.toPlainText()}
 
 
 def app_lock_enabled():
@@ -2405,7 +2462,23 @@ class Win(QMainWindow):
         r=db.conn(connection_id)
         if not r:
             return
-        t=Term(sshargs(r),connection_id=connection_id)
+
+        auth_password=None
+        if (r["auth_method"] or "key")=="password":
+            try:
+                auth_password=ssh_credentials.get_password(connection_id)
+            except ssh_credentials.KeychainError as exc:
+                QMessageBox.warning(
+                    self,
+                    "SSH Password",
+                    str(exc)+"\n\nYou can still enter the password manually.",
+                )
+
+        t=Term(
+            sshargs(r),
+            connection_id=connection_id,
+            auth_password=auth_password,
+        )
         t.sessionEnded.connect(lambda term=t:self.closeTerm(term))
         n=self.tabs.addTab(t,r["name"])
         self.tabs.setCurrentIndex(n)
@@ -2528,6 +2601,48 @@ class Win(QMainWindow):
                 self.saveExpandedFolders()
             self.reload()
 
+    def updateConnectionCredential(self,connection_id,data,name,source_connection_id=None):
+        auth_method=data.get("auth_method") or "key"
+
+        try:
+            if auth_method!="password":
+                ssh_credentials.clear_password(connection_id)
+                return
+
+            if not data.get("save_password"):
+                ssh_credentials.clear_password(connection_id)
+                return
+
+            password=data.get("password") or ""
+            if password:
+                ssh_credentials.set_password(
+                    connection_id,
+                    password,
+                    f"NotRoyalTs SSH - {name}",
+                )
+                return
+
+            # Editing an existing password connection with a blank field means
+            # "keep the saved Keychain password". Duplicating a password
+            # connection copies its existing Keychain secret when available.
+            if source_connection_id is not None and source_connection_id != connection_id:
+                source_password=ssh_credentials.get_password(source_connection_id)
+                if source_password:
+                    ssh_credentials.set_password(
+                        connection_id,
+                        source_password,
+                        f"NotRoyalTs SSH - {name}",
+                    )
+        except ssh_credentials.KeychainError as exc:
+            QMessageBox.warning(
+                self,
+                "SSH Password",
+                (
+                    "The connection was saved, but its password could not be "
+                    "updated in macOS Keychain.\n\n"+str(exc)
+                ),
+            )
+
     def newConn(self):
         d=ConnDialog(self,self.folderlabels())
         if d.exec():
@@ -2535,7 +2650,12 @@ class Win(QMainWindow):
             if not data["name"].strip() or not data["host"].strip() or not data["username"].strip():
                 QMessageBox.warning(self,"Missing fields","Name, host and username are required.")
                 return
-            db.save_conn(data)
+            connection_id=db.save_conn(data)
+            self.updateConnectionCredential(
+                connection_id,
+                data,
+                data["name"].strip(),
+            )
             self.reload()
 
     def duplicateConnection(self):
@@ -2577,7 +2697,14 @@ class Win(QMainWindow):
             d.folder.setCurrentIndex(idx)
 
         if d.exec():
-            db.save_conn(d.data())
+            new_data=d.data()
+            new_id=db.save_conn(new_data)
+            self.updateConnectionCredential(
+                new_id,
+                new_data,
+                new_data["name"].strip(),
+                source_connection_id=i,
+            )
             self.reload()
 
     def edit(self):
@@ -2591,7 +2718,14 @@ class Win(QMainWindow):
         elif k=="c":
             d=ConnDialog(self,self.folderlabels(),db.conn(i))
             if d.exec():
-                db.save_conn(d.data(),i)
+                data=d.data()
+                db.save_conn(data,i)
+                self.updateConnectionCredential(
+                    i,
+                    data,
+                    data["name"].strip(),
+                    source_connection_id=i,
+                )
                 self.reload()
 
     def delete(self):
@@ -2603,6 +2737,10 @@ class Win(QMainWindow):
             QMessageBox.Yes|QMessageBox.No
         )==QMessageBox.Yes:
             if k=="c":
+                try:
+                    ssh_credentials.clear_password(i)
+                except ssh_credentials.KeychainError as exc:
+                    QMessageBox.warning(self,"SSH Password",str(exc))
                 db.del_conn(i)
             else:
                 db.del_folder(i)
