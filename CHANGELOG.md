@@ -2,6 +2,21 @@
 
 All notable public changes to NotRoyalTs will be documented here.
 
+## 1.2.0 - Unreleased
+
+### Added
+
+- Per-connection authentication mode with **SSH Key** and **Password** options.
+- Password-authenticated connections can optionally save their password in macOS Keychain for automatic login.
+- Password connections can still leave the password unsaved and use the normal interactive OpenSSH prompt.
+
+### Changed
+
+- Existing connections migrate automatically to SSH Key authentication mode.
+- Backup export/import now preserves authentication mode while continuing to exclude SSH passwords and private-key contents.
+- Switching a connection back to SSH Key authentication or deleting it removes its saved SSH password from Keychain.
+
+
 ## 1.1.8 - Unreleased
 
 ### Fixed
